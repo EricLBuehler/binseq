@@ -12,7 +12,7 @@ pub struct BinseqReader<R: Read> {
     buffer: Vec<u64>,
     n_chunks: usize,
     rem: usize,
-    pub n_processed: usize,
+    n_processed: usize,
 }
 impl<R: Read> BinseqReader<R> {
     pub fn new(mut inner: R) -> Result<Self> {
@@ -42,7 +42,7 @@ impl<R: Read> BinseqReader<R> {
                 match self.inner.read(&mut buf) {
                     Ok(0) => Ok(false),
                     _ => {
-                        bail!(ReadError::UnexpectedEndOfStreamFlag(e));
+                        bail!(ReadError::UnexpectedEndOfStreamFlag(e, self.n_processed));
                     }
                 }
             }
@@ -55,7 +55,10 @@ impl<R: Read> BinseqReader<R> {
                 self.buffer.push(bits);
                 Ok(())
             }
-            Err(e) => bail!(ReadError::UnexpectedEndOfStreamSequence(e)),
+            Err(e) => bail!(ReadError::UnexpectedEndOfStreamSequence(
+                e,
+                self.n_processed
+            )),
         })
     }
 

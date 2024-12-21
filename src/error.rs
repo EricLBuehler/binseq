@@ -12,11 +12,11 @@ pub enum HeaderError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ReadError {
-    #[error("Unexpected end of stream in flag: {0}")]
-    UnexpectedEndOfStreamFlag(std::io::Error),
+    #[error("Unexpected end of stream in flag (record number: {1}): {0}")]
+    UnexpectedEndOfStreamFlag(std::io::Error, usize),
 
-    #[error("Unexpected end of stream in sequence: {0}")]
-    UnexpectedEndOfStreamSequence(std::io::Error),
+    #[error("Unexpected end of stream in sequence (record number: {1}): {0}")]
+    UnexpectedEndOfStreamSequence(std::io::Error, usize),
 }
 
 #[derive(thiserror::Error, Debug)]
