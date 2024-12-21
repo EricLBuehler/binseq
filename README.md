@@ -2,7 +2,7 @@
 Version 1.0
 
 ## Overview
-BINSEQ (.bsq) is a binary file format designed for efficient storage of fixed-length DNA sequences. It uses 2-bit encoding for nucleotides and focuses exclusively on sequence data, optimizing for modern high-throughput sequencing applications where quality scores and sequence identifiers are not required.
+BINSEQ (.bq) is a binary file format designed for efficient storage of fixed-length DNA sequences. It uses 2-bit encoding for nucleotides and focuses exclusively on sequence data, optimizing for modern high-throughput sequencing applications where quality scores and sequence identifiers are not required.
 
 ## File Structure
 A BINSEQ file consists of two sections:
