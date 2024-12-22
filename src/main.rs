@@ -7,14 +7,7 @@ use std::{
 
 use binseq::{BinseqHeader, BinseqReader, BinseqWriter};
 
-fn main() -> Result<()> {
-    // INPUT ARGUMENTS
-    // let fastq_path = "./data/subset_R1.fastq.gz";
-    let fastq_path = "./data/subset_R2.fastq.gz";
-    let binseq_path = "./data/output.bq";
-    // let seq_size = 28;
-    let seq_size = 90;
-
+fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
     // Open the input FASTQ file
     let (in_handle, _comp) = niffler::from_path(fastq_path)?;
 
@@ -65,6 +58,21 @@ fn main() -> Result<()> {
         num_records_write - num_records_read
     );
     eprintln!("Number of records in vec: {}", all_sequences.len());
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    // INPUT ARGUMENTS
+    let fastq_path_r1 = "./data/subset_R1.fastq.gz";
+    let fastq_path_r2 = "./data/subset_R2.fastq.gz";
+    let binseq_path_r1 = "./data/subset_R1.bq";
+    let binseq_path_r2 = "./data/subset_R2.bq";
+    let seq_size_r1 = 28;
+    let seq_size_r2 = 90;
+
+    read_write_single(fastq_path_r1, binseq_path_r1, seq_size_r1)?;
+    read_write_single(fastq_path_r2, binseq_path_r2, seq_size_r2)?;
 
     Ok(())
 }
