@@ -4,14 +4,35 @@ use std::io::Read;
 
 use crate::{BinseqHeader, ReadError, RefRecord};
 
+/// Sizing information for records
+#[derive(Debug, Clone, Copy)]
+pub struct RecordConfig {
+    /// The length of the sequence
+    pub slen: u32,
+
+    /// Number of u64 chunks required to represent the sequence (ceil(slen / 32))
+    pub n_chunks: usize,
+
+    /// Number of 2bits remaining after the last chunk (slen % 32)
+    pub rem: usize,
+}
+impl RecordConfig {
+    pub fn new(slen: u32) -> Self {
+        Self {
+            slen,
+            n_chunks: slen.div_ceil(32) as usize,
+            rem: (slen % 32) as usize,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct BinseqReader<R: Read> {
     inner: R,
     header: BinseqHeader,
     flag: u64,
     buffer: Vec<u64>,
-    n_chunks: usize,
-    rem: usize,
+    config: RecordConfig,
     n_processed: usize,
 }
 impl<R: Read> BinseqReader<R> {
@@ -19,13 +40,13 @@ impl<R: Read> BinseqReader<R> {
         let header = BinseqHeader::from_reader(&mut inner)?;
         let buffer = Vec::new();
         let flag = 0;
+        let config = RecordConfig::new(header.slen);
         Ok(Self {
             inner,
             header,
             flag,
             buffer,
-            n_chunks: header.slen.div_ceil(32) as usize,
-            rem: (header.slen % 32) as usize,
+            config,
             n_processed: 0,
         })
     }
@@ -50,7 +71,7 @@ impl<R: Read> BinseqReader<R> {
     }
 
     fn next_long<'a>(&'a mut self) -> Result<()> {
-        (0..self.n_chunks).try_for_each(|_| match self.inner.read_u64::<LittleEndian>() {
+        (0..self.config.n_chunks).try_for_each(|_| match self.inner.read_u64::<LittleEndian>() {
             Ok(bits) => {
                 self.buffer.push(bits);
                 Ok(())
@@ -80,18 +101,16 @@ impl<R: Read> BinseqReader<R> {
         }
 
         // Create the record
-        let ref_record = RefRecord::new(
-            self.flag,
-            &self.buffer,
-            self.header.slen,
-            self.n_chunks,
-            self.rem,
-        );
+        let ref_record = RefRecord::new(self.flag, &self.buffer, self.config);
 
         // Increment the number of processed records
         self.n_processed += 1;
 
         // Return the record as a reference
         Some(Ok(ref_record))
+    }
+
+    pub fn header(&self) -> BinseqHeader {
+        self.header
     }
 }

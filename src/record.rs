@@ -1,5 +1,7 @@
 use anyhow::Result;
 
+use crate::RecordConfig;
+
 pub type RefBytes<'a> = &'a [u64];
 
 #[derive(Debug)]
@@ -10,23 +12,15 @@ pub struct RefRecord<'a> {
     /// The 2-bit encoded sequence
     pub sequence: RefBytes<'a>,
 
-    /// Length of the sequence in nucleotides
-    pub slen: u32,
-
-    /// Number of 64-bit chunks in the sequence
-    pub n_chunks: usize,
-
-    /// Number of nucleotides in the last chunk
-    pub rem: usize,
+    /// Sizing information for the record
+    pub config: RecordConfig,
 }
 impl<'a> RefRecord<'a> {
-    pub fn new(flag: u64, sequence: RefBytes<'a>, slen: u32, n_chunks: usize, rem: usize) -> Self {
+    pub fn new(flag: u64, sequence: RefBytes<'a>, config: RecordConfig) -> Self {
         Self {
             flag,
             sequence,
-            slen,
-            n_chunks,
-            rem,
+            config,
         }
     }
     pub fn flag(&self) -> u64 {
@@ -39,12 +33,12 @@ impl<'a> RefRecord<'a> {
         // Process all chunks except the last one
         self.sequence()
             .iter()
-            .take(self.n_chunks - 1)
+            .take(self.config.n_chunks - 1)
             .try_for_each(|component| bitnuc::from_2bit(*component, 32, buffer))?;
 
         // Process the last one with the remainder
-        let component = self.sequence[self.n_chunks - 1];
-        bitnuc::from_2bit(component, self.rem, buffer)?;
+        let component = self.sequence[self.config.n_chunks - 1];
+        bitnuc::from_2bit(component, self.config.rem, buffer)?;
 
         Ok(())
     }

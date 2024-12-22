@@ -18,7 +18,14 @@ pub struct BinseqWriter<W: Write> {
     sbuf: [u8; 8],
 
     /// Reusable buffer for all nucleotides (written as 2-bit after conversion)
-    buffer: Vec<u64>,
+    ///
+    /// Used by the primary sequence (read 1)
+    sbuffer: Vec<u64>,
+
+    /// Reusable buffer for all nucleotides (written as 2-bit after conversion)
+    ///
+    /// Used by the extended sequence (read 2)
+    xbuffer: Vec<u64>,
 
     /// Break on invalid nucleotide sequence if encountered (skipped otherwise)
     break_on_invalid: bool,
@@ -34,7 +41,8 @@ impl<W: Write> BinseqWriter<W> {
             header,
             fbuf: [0; 8],
             sbuf: [0; 8],
-            buffer: Vec::new(),
+            sbuffer: Vec::new(),
+            xbuffer: Vec::new(),
             break_on_invalid,
             records_written: 0,
         })
@@ -46,8 +54,16 @@ impl<W: Write> BinseqWriter<W> {
         Ok(())
     }
 
-    fn write_buffer(&mut self) -> Result<()> {
-        self.buffer.iter().try_for_each(|chunk| {
+    fn write_sbuffer(&mut self) -> Result<()> {
+        self.sbuffer.iter().try_for_each(|chunk| {
+            LittleEndian::write_u64(&mut self.sbuf, *chunk);
+            self.inner.write_all(&self.sbuf)?;
+            Ok(())
+        })
+    }
+
+    fn write_xbuffer(&mut self) -> Result<()> {
+        self.xbuffer.iter().try_for_each(|chunk| {
             LittleEndian::write_u64(&mut self.sbuf, *chunk);
             self.inner.write_all(&self.sbuf)?;
             Ok(())
@@ -55,9 +71,9 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Fills the buffer with the 2-bit representation of the nucleotides
-    fn fill_buffer(&mut self, sequence: &[u8]) -> Result<()> {
+    fn fill_sbuffer(&mut self, sequence: &[u8]) -> Result<()> {
         // Clear the last sequence if any
-        self.buffer.clear();
+        self.sbuffer.clear();
 
         // Determine the number of chunks
         let n_chunks = self.header.slen.div_ceil(32);
@@ -68,14 +84,42 @@ impl<W: Write> BinseqWriter<W> {
             let chunk = &sequence[l_bounds..r_bounds];
 
             match bitnuc::as_2bit(chunk) {
-                Ok(bits) => self.buffer.push(bits),
+                Ok(bits) => self.sbuffer.push(bits),
                 Err(e) => bail!(e),
             }
             l_bounds = r_bounds;
         }
 
         match bitnuc::as_2bit(&sequence[l_bounds..]) {
-            Ok(bits) => self.buffer.push(bits),
+            Ok(bits) => self.sbuffer.push(bits),
+            Err(e) => bail!(e),
+        }
+
+        Ok(())
+    }
+
+    /// Fills the buffer with the 2-bit representation of the nucleotides
+    fn fill_xbuffer(&mut self, sequence: &[u8]) -> Result<()> {
+        // Clear the last sequence if any
+        self.xbuffer.clear();
+
+        // Determine the number of chunks
+        let n_chunks = self.header.xlen.div_ceil(32);
+
+        let mut l_bounds = 0;
+        for _ in 0..n_chunks - 1 {
+            let r_bounds = l_bounds + 32;
+            let chunk = &sequence[l_bounds..r_bounds];
+
+            match bitnuc::as_2bit(chunk) {
+                Ok(bits) => self.xbuffer.push(bits),
+                Err(e) => bail!(e),
+            }
+            l_bounds = r_bounds;
+        }
+
+        match bitnuc::as_2bit(&sequence[l_bounds..]) {
+            Ok(bits) => self.xbuffer.push(bits),
             Err(e) => bail!(e),
         }
 
@@ -94,10 +138,10 @@ impl<W: Write> BinseqWriter<W> {
                 got: sequence.len()
             })
         }
-        match self.fill_buffer(sequence) {
+        match self.fill_sbuffer(sequence) {
             Ok(_) => {
                 self.write_flag(flag)?;
-                self.write_buffer()?;
+                self.write_sbuffer()?;
                 self.records_written += 1;
                 Ok(true)
             }
@@ -109,6 +153,40 @@ impl<W: Write> BinseqWriter<W> {
                 }
             }
         }
+    }
+
+    /// Write a pair of nucleotide sequences to the file
+    ///
+    /// Returns `Ok(true)` if the sequences were written successfully, `Ok(false)` if the sequences were
+    /// skipped due to an invalid nucleotide sequence, and an error if the respective sequence lengths
+    /// do not match the header.
+    pub fn write_paired(&mut self, flag: u64, seq1: &[u8], seq2: &[u8]) -> Result<bool> {
+        if seq1.len() != self.header.slen as usize {
+            bail!(WriteError::UnexpectedSequenceLength {
+                expected: self.header.slen,
+                got: seq1.len()
+            })
+        }
+        if seq2.len() != self.header.slen as usize {
+            bail!(WriteError::UnexpectedSequenceLength {
+                expected: self.header.slen,
+                got: seq2.len()
+            })
+        }
+
+        if self.fill_sbuffer(seq1).is_err() || self.fill_xbuffer(seq2).is_err() {
+            if self.break_on_invalid {
+                bail!(WriteError::InvalidNucleotideSequence)
+            } else {
+                return Ok(false);
+            }
+        }
+
+        self.write_flag(flag)?;
+        self.write_sbuffer()?;
+        self.write_xbuffer()?;
+        self.records_written += 1;
+        Ok(true)
     }
 
     pub fn into_inner(self) -> W {
