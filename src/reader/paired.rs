@@ -1,10 +1,12 @@
 use anyhow::{bail, Result};
-use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
 use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord, RefRecordPair};
 
-use super::{BinseqRead, PairedEndRead, PairedRead};
+use super::{
+    utils::{next_binseq, next_flag},
+    BinseqRead, PairedEndRead, PairedRead,
+};
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {
@@ -54,79 +56,41 @@ impl<R: Read> PairedReader<R> {
         })
     }
 
-    fn next_flag(&mut self) -> Result<bool> {
-        match self.inner.read_u64::<LittleEndian>() {
-            Ok(flag) => {
-                self.flag = flag;
-                Ok(true)
-            }
-            Err(e) => {
-                // check if there are any bytes left in the reader
-                let mut buf = [0u8; 1];
-                match self.inner.read(&mut buf) {
-                    Ok(0) => Ok(false),
-                    _ => {
-                        bail!(ReadError::UnexpectedEndOfStreamFlag(e, self.n_processed));
-                    }
-                }
-            }
-        }
-    }
-
-    fn next_primary<'a>(&'a mut self) -> Result<()> {
-        (0..self.sconfig.n_chunks).try_for_each(|_| match self.inner.read_u64::<LittleEndian>() {
-            Ok(bits) => {
-                self.sbuf.push(bits);
-                Ok(())
-            }
-            Err(e) => bail!(ReadError::UnexpectedEndOfStreamSequence(
-                e,
-                self.n_processed
-            )),
-        })
-    }
-
-    fn next_extended<'a>(&'a mut self) -> Result<()> {
-        (0..self.xconfig.n_chunks).try_for_each(|_| match self.inner.read_u64::<LittleEndian>() {
-            Ok(bits) => {
-                self.xbuf.push(bits);
-                Ok(())
-            }
-            Err(e) => bail!(ReadError::UnexpectedEndOfStreamSequence(
-                e,
-                self.n_processed
-            )),
-        })
-    }
-
     fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
         // Clear the last sequence buffer
         self.sbuf.clear();
         self.xbuf.clear();
 
         // Read the flag
-        match self.next_flag() {
-            // Continue with the next step
-            Ok(true) => {}
-
-            // End of file
-            Ok(false) => {
+        match next_flag(&mut self.inner, self.n_processed) {
+            Ok(Some(flag)) => {
+                self.flag = flag;
+            }
+            Ok(None) => {
                 self.finished = true;
                 return None;
             }
-
-            // Unexpected error
             Err(e) => return Some(Err(e)),
         }
 
-        // Read the sequence
-        match self.next_primary() {
+        // Read the primary sequence
+        match next_binseq(
+            &mut self.inner,
+            &mut self.sbuf,
+            self.sconfig,
+            self.n_processed,
+        ) {
             Ok(_) => {}
             Err(e) => return Some(Err(e)),
         }
 
         // Read the extended sequence
-        match self.next_extended() {
+        match next_binseq(
+            &mut self.inner,
+            &mut self.xbuf,
+            self.xconfig,
+            self.n_processed,
+        ) {
             Ok(_) => {}
             Err(e) => return Some(Err(e)),
         }

@@ -1,10 +1,12 @@
 use anyhow::{bail, Result};
-use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
 use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord};
 
-use super::{BinseqRead, SingleEndRead};
+use super::{
+    utils::{next_binseq, next_flag},
+    BinseqRead, SingleEndRead,
+};
 
 #[derive(Debug)]
 pub struct SingleReader<R: Read> {
@@ -36,59 +38,29 @@ impl<R: Read> SingleReader<R> {
         })
     }
 
-    fn next_flag(&mut self) -> Result<bool> {
-        match self.inner.read_u64::<LittleEndian>() {
-            Ok(flag) => {
-                self.flag = flag;
-                Ok(true)
-            }
-            Err(e) => {
-                // check if there are any bytes left in the reader
-                let mut buf = [0u8; 1];
-                match self.inner.read(&mut buf) {
-                    Ok(0) => Ok(false),
-                    _ => {
-                        bail!(ReadError::UnexpectedEndOfStreamFlag(e, self.n_processed));
-                    }
-                }
-            }
-        }
-    }
-
-    fn next_long<'a>(&'a mut self) -> Result<()> {
-        (0..self.config.n_chunks).try_for_each(|_| match self.inner.read_u64::<LittleEndian>() {
-            Ok(bits) => {
-                self.buffer.push(bits);
-                Ok(())
-            }
-            Err(e) => bail!(ReadError::UnexpectedEndOfStreamSequence(
-                e,
-                self.n_processed
-            )),
-        })
-    }
-
     fn next_record<'a>(&'a mut self) -> Option<Result<RefRecord<'a>>> {
         // Clear the last sequence buffer
         self.buffer.clear();
 
         // Read the flag
-        match self.next_flag() {
-            // continue with the next step
-            Ok(true) => {}
-
-            // end of the stream
-            Ok(false) => {
+        match next_flag(&mut self.inner, self.n_processed) {
+            Ok(Some(flag)) => {
+                self.flag = flag;
+            }
+            Ok(None) => {
                 self.finished = true;
                 return None;
             }
-
-            // unexpected error
             Err(e) => return Some(Err(e)),
         }
 
         // Read the sequence
-        match self.next_long() {
+        match next_binseq(
+            &mut self.inner,
+            &mut self.buffer,
+            self.config,
+            self.n_processed,
+        ) {
             Ok(_) => {}
             Err(e) => return Some(Err(e)),
         }
