@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::RefBytes;
+use super::{RefBytes, RefRecord};
 use crate::RecordConfig;
 
 #[derive(Debug)]
@@ -89,5 +89,13 @@ impl<'a> RefRecordPair<'a> {
         let mut buffer = Vec::new();
         self.decode_x(&mut buffer)?;
         Ok(buffer)
+    }
+
+    pub fn primary(self) -> RefRecord<'a> {
+        RefRecord::new(self.flag, self.s_seq, self.s_config)
+    }
+
+    pub fn extended(self) -> RefRecord<'a> {
+        RefRecord::new(self.flag, self.x_seq, self.x_config)
     }
 }

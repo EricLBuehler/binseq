@@ -2,10 +2,12 @@ use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
-use crate::{BinseqHeader, ReadError, RecordConfig, RefRecordPair};
+use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord, RefRecordPair};
+
+use super::{BinseqRead, PairedEndRead, PairedRead};
 
 #[derive(Debug)]
-pub struct PairedBinseqReader<R: Read> {
+pub struct PairedReader<R: Read> {
     /// Inner reader
     inner: R,
 
@@ -29,8 +31,11 @@ pub struct PairedBinseqReader<R: Read> {
 
     /// Number of record pairs processed
     n_processed: usize,
+
+    /// Finished reading the file
+    finished: bool,
 }
-impl<R: Read> PairedBinseqReader<R> {
+impl<R: Read> PairedReader<R> {
     pub fn new(mut inner: R) -> Result<Self> {
         let header = BinseqHeader::from_reader(&mut inner)?;
         if header.xlen == 0 {
@@ -45,6 +50,7 @@ impl<R: Read> PairedBinseqReader<R> {
             sconfig: RecordConfig::new(header.slen),
             xconfig: RecordConfig::new(header.xlen),
             n_processed: 0,
+            finished: false,
         })
     }
 
@@ -93,16 +99,24 @@ impl<R: Read> PairedBinseqReader<R> {
         })
     }
 
-    pub fn next<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
+    fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
         // Clear the last sequence buffer
         self.sbuf.clear();
         self.xbuf.clear();
 
         // Read the flag
         match self.next_flag() {
-            Ok(true) => {}                 // continue with the next step
-            Ok(false) => return None,      // end of file
-            Err(e) => return Some(Err(e)), // unexpected error
+            // Continue with the next step
+            Ok(true) => {}
+
+            // End of file
+            Ok(false) => {
+                self.finished = true;
+                return None;
+            }
+
+            // Unexpected error
+            Err(e) => return Some(Err(e)),
         }
 
         // Read the sequence
@@ -132,12 +146,49 @@ impl<R: Read> PairedBinseqReader<R> {
         // Return the record as a reference
         Some(Ok(ref_record))
     }
+}
 
-    pub fn header(&self) -> BinseqHeader {
+impl<R: Read> BinseqRead for PairedReader<R> {
+    fn next(&mut self) -> Option<Result<RefRecord>> {
+        self.next_pair().map(|pair| pair.map(|pair| pair.primary()))
+    }
+
+    fn header(&self) -> BinseqHeader {
         self.header
     }
 
-    pub fn n_processed(&self) -> usize {
+    fn is_paired(&self) -> bool {
+        true
+    }
+
+    fn record_size(&self) -> usize {
+        // flag + primary + extended
+        8 + (self.sconfig.n_chunks * 8) + (self.xconfig.n_chunks * 8)
+    }
+
+    fn n_processed(&self) -> usize {
         self.n_processed
     }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
 }
+
+impl<R: Read> PairedRead for PairedReader<R> {
+    fn next_paired(&mut self) -> Option<Result<RefRecordPair>> {
+        self.next_pair()
+    }
+
+    fn next_primary(&mut self) -> Option<Result<RefRecord>> {
+        self.next_paired()
+            .map(|record| record.map(|record| record.primary()))
+    }
+
+    fn next_extended(&mut self) -> Option<Result<RefRecord>> {
+        self.next_paired()
+            .map(|record| record.map(|record| record.extended()))
+    }
+}
+
+impl<R: Read> PairedEndRead for PairedReader<R> {}

@@ -6,7 +6,9 @@ mod writer;
 
 pub use error::{HeaderError, ReadError, WriteError};
 pub use header::BinseqHeader;
-pub use reader::{BinseqReader, PairedBinseqReader, RecordConfig};
+pub use reader::{
+    BinseqRead, PairedEndRead, PairedRead, PairedReader, RecordConfig, SingleEndRead, SingleReader,
+};
 pub use record::{RefBytes, RefRecord, RefRecordPair};
 pub use writer::BinseqWriter;
 
@@ -26,7 +28,7 @@ mod testing {
         writer.write_nucleotides(0, sequence)?;
 
         let cursor = writer.into_inner().into_inner();
-        let mut reader = BinseqReader::new(cursor.as_slice())?;
+        let mut reader = SingleReader::new(cursor.as_slice())?;
         let record = reader.next().unwrap()?;
         assert_eq!(record.flag(), 0);
         let bitseq = record.sequence()[0];
@@ -47,7 +49,7 @@ mod testing {
         writer.write_nucleotides(0, sequence)?; // write 3 times
 
         let cursor = writer.into_inner().into_inner();
-        let mut reader = BinseqReader::new(cursor.as_slice())?;
+        let mut reader = SingleReader::new(cursor.as_slice())?;
 
         for _ in 0..3 {
             let record = reader.next().unwrap()?;
@@ -69,7 +71,7 @@ mod testing {
         writer.write_nucleotides(0, sequence)?;
 
         let cursor = writer.into_inner().into_inner();
-        let mut reader = BinseqReader::new(cursor.as_slice())?;
+        let mut reader = SingleReader::new(cursor.as_slice())?;
         let record = reader.next().unwrap()?;
         assert_eq!(record.flag(), 0);
 
@@ -99,7 +101,7 @@ mod testing {
         writer.write_nucleotides(0, sequence)?; // write 3 times
 
         let cursor = writer.into_inner().into_inner();
-        let mut reader = BinseqReader::new(cursor.as_slice())?;
+        let mut reader = SingleReader::new(cursor.as_slice())?;
 
         for _ in 0..3 {
             let record = reader.next().unwrap()?;
@@ -130,7 +132,7 @@ mod testing {
         writer.write_nucleotides(0, sequence)?;
 
         let cursor = writer.into_inner().into_inner();
-        let mut reader = BinseqReader::new(cursor.as_slice())?;
+        let mut reader = SingleReader::new(cursor.as_slice())?;
         let record = reader.next();
         dbg!(&record);
         assert!(record.is_none());

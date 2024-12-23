@@ -5,7 +5,7 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-use binseq::{BinseqHeader, BinseqReader, BinseqWriter, PairedBinseqReader};
+use binseq::{BinseqHeader, BinseqRead, BinseqWriter, PairedRead, PairedReader, SingleReader};
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
     // Open the input FASTQ file
@@ -38,7 +38,7 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
 
     // Read the binary sequence
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
-    let mut reader = BinseqReader::new(bufreader)?;
+    let mut reader = SingleReader::new(bufreader)?;
     let mut num_records_read = 0;
     let mut record_buffer = Vec::new();
     while let Some(record) = reader.next() {
@@ -122,12 +122,12 @@ fn read_write_paired(
     // Read the binary sequence
 
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
-    let mut reader = PairedBinseqReader::new(bufreader)?;
+    let mut reader = PairedReader::new(bufreader)?;
     let mut sbuf = Vec::new();
     let mut xbuf = Vec::new();
 
     let mut n_processed = 0;
-    while let Some(pair) = reader.next() {
+    while let Some(pair) = reader.next_paired() {
         let pair = pair?;
         pair.decode_s(&mut sbuf)?;
         pair.decode_x(&mut xbuf)?;
