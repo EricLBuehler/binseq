@@ -2,9 +2,7 @@ use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
-use crate::ReadError;
-
-use super::RecordConfig;
+use crate::{ReadError, RecordConfig};
 
 /// Read the next flag from the reader
 ///
