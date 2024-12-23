@@ -162,8 +162,8 @@ fn main() -> Result<()> {
     let seq_size_r1 = 28;
     let seq_size_r2 = 90;
 
-    // read_write_single(fastq_path_r1, binseq_path_r1, seq_size_r1)?;
-    // read_write_single(fastq_path_r2, binseq_path_r2, seq_size_r2)?;
+    read_write_single(fastq_path_r1, binseq_path_r1, seq_size_r1)?;
+    read_write_single(fastq_path_r2, binseq_path_r2, seq_size_r2)?;
     read_write_paired(
         fastq_path_r1,
         fastq_path_r2,
