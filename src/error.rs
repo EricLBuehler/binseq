@@ -17,6 +17,12 @@ pub enum ReadError {
 
     #[error("Unexpected end of stream in sequence (record number: {1}): {0}")]
     UnexpectedEndOfStreamSequence(std::io::Error, usize),
+
+    #[error("Unpaired sequence reader used for paired sequence input. Found xlen: {0}")]
+    UnexpectedPairedBinseq(u32),
+
+    #[error("Missing paired sequence - found slen: {0} but xlen: 0")]
+    MissingPairedSequence(u32),
 }
 
 #[derive(thiserror::Error, Debug)]

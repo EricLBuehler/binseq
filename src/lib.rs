@@ -6,8 +6,8 @@ mod writer;
 
 pub use error::{HeaderError, ReadError, WriteError};
 pub use header::BinseqHeader;
-pub use reader::{BinseqReader, RecordConfig};
-pub use record::{RefBytes, RefRecord};
+pub use reader::{BinseqReader, PairedBinseqReader, RecordConfig};
+pub use record::{RefBytes, RefRecord, RefRecordPair};
 pub use writer::BinseqWriter;
 
 #[cfg(test)]

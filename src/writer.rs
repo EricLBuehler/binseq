@@ -167,7 +167,7 @@ impl<W: Write> BinseqWriter<W> {
                 got: seq1.len()
             })
         }
-        if seq2.len() != self.header.slen as usize {
+        if seq2.len() != self.header.xlen as usize {
             bail!(WriteError::UnexpectedSequenceLength {
                 expected: self.header.slen,
                 got: seq2.len()

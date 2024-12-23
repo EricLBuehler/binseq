@@ -1,8 +1,7 @@
 use anyhow::Result;
 
+use super::RefBytes;
 use crate::RecordConfig;
-
-pub type RefBytes<'a> = &'a [u64];
 
 #[derive(Debug)]
 pub struct RefRecord<'a> {
