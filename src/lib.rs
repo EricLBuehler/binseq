@@ -10,7 +10,7 @@ pub use reader::{
     BinseqRead, PairedEndRead, PairedRead, PairedReader, SingleEndRead, SingleReader,
 };
 pub use record::{RecordConfig, RefBytes, RefRecord, RefRecordPair};
-pub use writer::BinseqWriter;
+pub use writer::{embed, BinseqWriter};
 
 #[cfg(test)]
 mod testing {
