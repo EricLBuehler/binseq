@@ -38,7 +38,7 @@ Total record size = 8 + (ceil(N/32) * 8) bytes, where N is sequence length
 - Sequences are stored in Little-Endian order
 - The final u64 of sequence data is padded with zeros if the sequence length is not divisible by 32
 
-The following sequence: `ACTG` would be encoded as:
+The following sequence: `ACGT` would be encoded as:
 
 ```text
 # A := 00
