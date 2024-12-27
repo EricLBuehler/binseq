@@ -8,24 +8,37 @@ use crate::error::HeaderError;
 const MAGIC: u32 = 0x42534551;
 
 /// Current format version
-const FORMAT: u8 = 1;
+const FORMAT: u8 = 2;
 
 /// Size of the header in bytes
-const SIZE_HEADER: usize = 16;
+const SIZE_HEADER: usize = 32;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BinseqHeader {
     /// Magic number to identify the file format
+    ///
+    /// 4 bytes
     pub magic: u32,
 
     /// Version of the file format
+    ///
+    /// 1 byte
     pub format: u8,
 
     /// Length of all sequences in the file
+    ///
+    /// 4 bytes
     pub slen: u32,
 
-    // reserve 7 bytes for future use
-    pub reserved: [u8; 7],
+    /// Length of secondary sequences in the file
+    ///
+    /// 4 bytes
+    pub xlen: u32,
+
+    // Reserve remaining bytes for future use
+    //
+    // 19 bytes
+    pub reserved: [u8; 19],
 }
 impl BinseqHeader {
     pub fn new(slen: u32) -> Self {
@@ -33,7 +46,18 @@ impl BinseqHeader {
             magic: MAGIC,
             format: FORMAT,
             slen,
-            reserved: [0; 7],
+            xlen: 0,
+            reserved: [0; 19],
+        }
+    }
+
+    pub fn new_extended(slen: u32, xlen: u32) -> Self {
+        Self {
+            magic: MAGIC,
+            format: FORMAT,
+            slen,
+            xlen,
+            reserved: [0; 19],
         }
     }
 
@@ -47,7 +71,8 @@ impl BinseqHeader {
             bail!(HeaderError::InvalidFormatVersion(format));
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
-        let reserved = match Vec::from(&buffer[9..16]).try_into() {
+        let xlen = LittleEndian::read_u32(&buffer[9..13]);
+        let reserved = match buffer[13..32].try_into() {
             Ok(reserved) => reserved,
             Err(_) => bail!(HeaderError::InvalidReservedBytes),
         };
@@ -55,6 +80,7 @@ impl BinseqHeader {
             magic,
             format,
             slen,
+            xlen,
             reserved,
         })
     }
@@ -64,7 +90,8 @@ impl BinseqHeader {
         LittleEndian::write_u32(&mut buffer[0..4], self.magic);
         buffer[4] = self.format;
         LittleEndian::write_u32(&mut buffer[5..9], self.slen);
-        buffer[9..16].copy_from_slice(&self.reserved);
+        LittleEndian::write_u32(&mut buffer[9..13], self.xlen);
+        buffer[13..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }
