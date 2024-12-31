@@ -34,16 +34,7 @@ impl<'a> RefRecord<'a> {
     }
 
     pub fn decode(&self, buffer: &mut Vec<u8>) -> Result<()> {
-        // Process all chunks except the last one
-        self.sequence()
-            .iter()
-            .take(self.config.n_chunks - 1)
-            .try_for_each(|component| bitnuc::from_2bit(*component, 32, buffer))?;
-
-        // Process the last one with the remainder
-        let component = self.sequence[self.config.n_chunks - 1];
-        bitnuc::from_2bit(component, self.config.rem, buffer)?;
-
+        bitnuc::decode(self.sequence(), self.config.slen as usize, buffer)?;
         Ok(())
     }
 
@@ -63,17 +54,9 @@ impl<'a> RefRecord<'a> {
         sub_buffer.clear();
         seq_buffer.clear();
 
-        let (n_chunks, rem) = self.subsequence(range, sub_buffer)?;
-
-        // Decode each chunk except the last one
-        for component in sub_buffer.iter().take(n_chunks - 1) {
-            bitnuc::from_2bit(*component, 32, seq_buffer)?;
-        }
-
-        // Decode the last chunk with the remainder
-        let component = sub_buffer[n_chunks - 1];
-        bitnuc::from_2bit(component, rem, seq_buffer)?;
-
+        let n_bases = range.len();
+        let (_n_chunks, _rem) = self.subsequence(range, sub_buffer)?;
+        bitnuc::decode(&sub_buffer, n_bases, seq_buffer)?;
         Ok(())
     }
 
