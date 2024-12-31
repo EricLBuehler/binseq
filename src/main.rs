@@ -33,7 +33,10 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
         }
     }
     writer.flush()?;
-    eprintln!("Finished writing {} records", num_records_write);
+    eprintln!(
+        "Finished writing {} records to path: {}",
+        num_records_write, binseq_path
+    );
     eprintln!("Skipped {} records", skipped_records);
 
     // Read the binary sequence
@@ -47,7 +50,9 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
         record.decode(&mut record_buffer)?;
 
         // Check if the decoded sequence matches the original
-        assert_eq!(record_buffer, all_sequences[num_records_read]);
+        let buf_str = std::str::from_utf8(&record_buffer)?;
+        let seq_str = std::str::from_utf8(&all_sequences[num_records_read])?;
+        assert_eq!(buf_str, seq_str);
 
         num_records_read += 1;
         record_buffer.clear();

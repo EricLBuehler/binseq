@@ -52,31 +52,14 @@ impl<'a> RefRecordPair<'a> {
         self.x_config
     }
 
-    fn decode(
-        &self,
-        sequence: RefBytes<'a>,
-        config: RecordConfig,
-        buffer: &mut Vec<u8>,
-    ) -> Result<()> {
-        // Process all chunks except the last one
-        sequence
-            .iter()
-            .take(config.n_chunks - 1)
-            .try_for_each(|component| bitnuc::from_2bit(*component, 32, buffer))?;
-
-        // Process the last one with the remainder
-        let component = sequence[config.n_chunks - 1];
-        bitnuc::from_2bit(component, config.rem, buffer)?;
-
+    pub fn decode_s(&self, buffer: &mut Vec<u8>) -> Result<()> {
+        bitnuc::decode(self.s_seq, self.s_config.slen as usize, buffer)?;
         Ok(())
     }
 
-    pub fn decode_s(&self, buffer: &mut Vec<u8>) -> Result<()> {
-        self.decode(self.s_seq, self.s_config, buffer)
-    }
-
     pub fn decode_x(&self, buffer: &mut Vec<u8>) -> Result<()> {
-        self.decode(self.x_seq, self.x_config, buffer)
+        bitnuc::decode(self.x_seq, self.x_config.slen as usize, buffer)?;
+        Ok(())
     }
 
     pub fn decode_s_alloc(&self) -> Result<Vec<u8>> {
