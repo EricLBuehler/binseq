@@ -3,7 +3,7 @@ use std::io::Write;
 
 use crate::{error::WriteError, BinseqHeader};
 
-use super::utils::{embed, write_buffer, write_flag};
+use super::utils::{write_buffer, write_flag};
 
 pub struct BinseqWriter<W: Write> {
     /// Inner writer
@@ -22,12 +22,6 @@ pub struct BinseqWriter<W: Write> {
     /// Used by the extended sequence (read 2)
     xbuffer: Vec<u64>,
 
-    /// Number of chunks in the primary sequence
-    s_n_chunks: usize,
-
-    /// Number of chunks in the extended sequence
-    x_n_chunks: usize,
-
     /// Break on invalid nucleotide sequence if encountered (skipped otherwise)
     break_on_invalid: bool,
 
@@ -42,8 +36,6 @@ impl<W: Write> BinseqWriter<W> {
             header,
             sbuffer: Vec::new(),
             xbuffer: Vec::new(),
-            s_n_chunks: header.slen.div_ceil(32) as usize,
-            x_n_chunks: header.xlen.div_ceil(32) as usize,
             break_on_invalid,
             records_written: 0,
         })
@@ -63,7 +55,7 @@ impl<W: Write> BinseqWriter<W> {
         }
 
         // Fill the buffer with the 2-bit representation of the nucleotides
-        if embed(sequence, self.s_n_chunks, &mut self.sbuffer).is_err() {
+        if bitnuc::encode(sequence, &mut self.sbuffer).is_err() {
             if self.break_on_invalid {
                 bail!(WriteError::InvalidNucleotideSequence)
             } else {
@@ -96,8 +88,8 @@ impl<W: Write> BinseqWriter<W> {
             })
         }
 
-        if embed(seq1, self.s_n_chunks, &mut self.sbuffer).is_err()
-            || embed(seq2, self.x_n_chunks, &mut self.xbuffer).is_err()
+        if bitnuc::encode(seq1, &mut self.sbuffer).is_err()
+            || bitnuc::encode(seq2, &mut self.xbuffer).is_err()
         {
             if self.break_on_invalid {
                 bail!(WriteError::InvalidNucleotideSequence)

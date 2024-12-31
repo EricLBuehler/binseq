@@ -198,13 +198,11 @@ impl<'a> RefRecord<'a> {
 #[cfg(test)]
 mod testing {
     use super::*;
-    use crate::embed;
     use anyhow::Result;
 
     fn embed_sequence(nucl: &[u8]) -> Vec<u64> {
         let mut ebuf = Vec::new();
-        let n_chunks = nucl.len().div_ceil(32);
-        embed(&nucl, n_chunks, &mut ebuf).unwrap();
+        bitnuc::encode(nucl, &mut ebuf).unwrap();
         ebuf
     }
 
