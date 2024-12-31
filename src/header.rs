@@ -11,7 +11,7 @@ const MAGIC: u32 = 0x42534551;
 const FORMAT: u8 = 2;
 
 /// Size of the header in bytes
-const SIZE_HEADER: usize = 32;
+pub const SIZE_HEADER: usize = 32;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BinseqHeader {
@@ -47,7 +47,7 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen: 0,
-            reserved: [0; 19],
+            reserved: [42; 19],
         }
     }
 
@@ -57,7 +57,7 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen,
-            reserved: [0; 19],
+            reserved: [42; 19],
         }
     }
 
