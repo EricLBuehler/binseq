@@ -15,7 +15,10 @@ impl RecordConfig {
         Self {
             slen,
             n_chunks: slen.div_ceil(32) as usize,
-            rem: (slen % 32) as usize,
+            rem: match slen % 32 {
+                0 => 32,
+                rem => rem as usize,
+            },
         }
     }
 }
