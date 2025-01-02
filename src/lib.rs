@@ -10,7 +10,7 @@ pub use header::BinseqHeader;
 pub use reader::{
     BinseqRead, PairedEndRead, PairedRead, PairedReader, SingleEndRead, SingleReader,
 };
-pub use record::{BinseqRecord, RecordConfig, RefBytes, RefRecord, RefRecordPair};
+pub use record::{BinseqRecord, Record, RecordConfig, RefBytes, RefRecord, RefRecordPair};
 pub use utils::expected_file_size;
 pub use writer::BinseqWriter;
 
