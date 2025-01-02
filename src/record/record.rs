@@ -1,7 +1,7 @@
 use super::{BinseqRecord, RefBytes};
 use crate::RecordConfig;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Record {
     /// The 8-byte flag
     pub flag: u64,
@@ -14,12 +14,27 @@ pub struct Record {
 }
 
 impl Record {
-    pub fn new<'a>(flag: u64, sequence: RefBytes<'a>, config: RecordConfig) -> Self {
+    pub fn new<'a>(flag: u64, sequence: Vec<u64>, config: RecordConfig) -> Self {
         Self {
             flag,
-            sequence: sequence.to_vec(),
+            sequence,
             config,
         }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            flag: 0,
+            sequence: Vec::new(),
+            config: RecordConfig::new(0),
+        }
+    }
+
+    pub fn update(&mut self, flag: u64, sequence: RefBytes, config: RecordConfig) {
+        self.flag = flag;
+        self.sequence.clear();
+        self.sequence.extend_from_slice(sequence);
+        self.config = config;
     }
 }
 
@@ -54,7 +69,7 @@ mod testing {
         let ebuf = embed_sequence(seq);
         let config = RecordConfig::new(seq.len() as u32);
 
-        let record = Record::new(0, ebuf.as_slice(), config);
+        let record = Record::new(0, ebuf, config);
 
         // First 4 bases
         let subseq = record.decode_subsequence_alloc(0..4)?;
@@ -81,7 +96,7 @@ mod testing {
         let ebuf = embed_sequence(seq);
         let config = RecordConfig::new(seq.len() as u32);
 
-        let record = Record::new(0, ebuf.as_slice(), config);
+        let record = Record::new(0, ebuf, config);
 
         // First 4 bases
         let subseq = record.decode_subsequence_alloc(0..4)?;

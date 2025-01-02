@@ -21,7 +21,10 @@ impl<'a> RefRecord<'a> {
         }
     }
     pub fn to_owned(&self) -> Record {
-        Record::new(self.flag, self.sequence, self.config)
+        Record::new(self.flag, self.sequence.to_vec(), self.config)
+    }
+    pub fn update_record(&self, record: &mut Record) {
+        record.update(self.flag, self.sequence, self.config);
     }
 }
 
