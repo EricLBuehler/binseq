@@ -74,6 +74,10 @@ impl<R: Read> SingleReader<R> {
         // Return the record as a reference
         Some(Ok(ref_record))
     }
+
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
 }
 
 impl<R: Read> BinseqRead for SingleReader<R> {
