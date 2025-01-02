@@ -5,7 +5,9 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-use binseq::{BinseqHeader, BinseqRead, BinseqWriter, PairedRead, PairedReader, SingleReader};
+use binseq::{
+    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, PairedRead, PairedReader, SingleReader,
+};
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
     // Open the input FASTQ file
