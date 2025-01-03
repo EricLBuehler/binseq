@@ -6,11 +6,11 @@ use std::{
 };
 
 use crate::{
-    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ReadError, RecordConfig, RecordSet,
-    RefRecord, RefRecordPair,
+    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ParallelPairedProcessor, ReadError,
+    RecordConfig, RecordSet, RefRecord, RefRecordPair,
 };
 
-use super::{utils::fill_paired_record_set, ParallelPairedProcessor};
+use super::utils::fill_paired_record_set;
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {
