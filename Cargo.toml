@@ -7,13 +7,13 @@ edition = "2021"
 anyhow = "1.0.94"
 bitnuc = "0.2.6"
 byteorder = "1.5.0"
-niffler = "2.6.0"
-seq_io = "0.3.2"
 thiserror = "2.0.8"
 
 [dev-dependencies]
 nucgen = "0.1.1"
 rand = "0.8.5"
+niffler = "2.6.0"
+seq_io = "0.3.2"
 
 [profile.release]
 lto = true
