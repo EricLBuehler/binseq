@@ -1,12 +1,16 @@
 use anyhow::{bail, Result};
-use std::io::Read;
+use std::{
+    io::Read,
+    sync::{Arc, Mutex},
+    thread,
+};
 
 use crate::{
     BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ReadError, RecordConfig, RecordSet,
     RefRecord, RefRecordPair,
 };
 
-use super::utils::fill_paired_record_set;
+use super::{utils::fill_paired_record_set, ParallelPairedProcessor};
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {
@@ -84,6 +88,28 @@ impl<R: Read> PairedReader<R> {
 
         Some(Ok(record))
     }
+
+    /// Fill an external record set with records
+    /// Returns true if EOF was reached, false if the record set was filled
+    pub fn fill_external_set(&mut self, record_set: &mut RecordSet) -> Result<bool> {
+        // Verify the external record set has compatible configuration
+        if record_set.sconfig() != self.sconfig {
+            bail!(ReadError::IncompatibleRecordSet(
+                self.sconfig,
+                record_set.sconfig(),
+            ));
+        }
+
+        if record_set.xconfig() != self.xconfig {
+            bail!(ReadError::IncompatibleRecordSet(
+                self.xconfig,
+                record_set.xconfig(),
+            ));
+        }
+
+        // Use the existing fill_record_set utility function
+        fill_paired_record_set(&mut self.inner, record_set, &mut self.n_processed)
+    }
 }
 
 impl<R: Read> BinseqRead for PairedReader<R> {
@@ -130,3 +156,75 @@ impl<R: Read> PairedRead for PairedReader<R> {
 }
 
 impl<R: Read> PairedEndRead for PairedReader<R> {}
+
+/// Implementation of parallel processing for single-end readers
+impl<R: Read + Send + Sync + 'static> PairedReader<R> {
+    /// Process records in parallel using the provided processor
+    pub fn process_parallel<P: ParallelPairedProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+    ) -> Result<()> {
+        let sconfig = self.sconfig;
+        let xconfig = self.xconfig;
+
+        // Create shared reader
+        let reader = Arc::new(Mutex::new(self));
+
+        // Create processors for each thread
+        let processors = Arc::new(Mutex::new(
+            (0..num_threads)
+                .map(|_| processor.clone())
+                .collect::<Vec<_>>(),
+        ));
+
+        let mut handles = Vec::new();
+
+        // Spawn worker threads
+        for thread_id in 0..num_threads {
+            let reader = Arc::clone(&reader);
+            let processors = Arc::clone(&processors);
+
+            let handle = thread::spawn(move || -> Result<()> {
+                let mut record_set = RecordSet::new_paired(sconfig, xconfig);
+
+                loop {
+                    // Fill this thread's record set
+                    let finished = {
+                        let mut reader = reader.lock().unwrap();
+                        reader.fill_external_set(&mut record_set)?
+                    };
+
+                    // Process records in this batch
+                    {
+                        let mut processors = processors.lock().unwrap();
+                        let processor = &mut processors[thread_id];
+
+                        for i in 0..record_set.n_records() {
+                            let pair = record_set.get_record_pair(i).unwrap();
+                            processor.process_record_pair(pair)?;
+                        }
+
+                        processor.on_batch_complete()?;
+                    }
+
+                    // Exit if we hit EOF and processed all records
+                    if finished && record_set.is_empty() {
+                        break;
+                    }
+                }
+
+                Ok(())
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
+
+        Ok(())
+    }
+}
