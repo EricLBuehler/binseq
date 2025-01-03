@@ -1,12 +1,12 @@
 use anyhow::{bail, Result};
 use std::io::Read;
 
-use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord, RefRecordPair};
-
-use super::{
-    utils::{next_binseq, next_flag},
-    BinseqRead, PairedEndRead, PairedRead,
+use crate::{
+    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ReadError, RecordConfig, RefRecord,
+    RefRecordPair,
 };
+
+use super::utils::{next_binseq, next_flag};
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {

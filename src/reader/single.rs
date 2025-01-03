@@ -1,11 +1,17 @@
 use anyhow::{bail, Result};
-use std::io::Read;
+use std::{
+    io::Read,
+    sync::{Arc, Mutex},
+    thread,
+};
 
-use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord};
+use super::utils::fill_record_set;
+use crate::{
+    BinseqHeader, BinseqRead, ParallelProcessor, ReadError, RecordConfig, RecordSet, RefRecord,
+    SingleEndRead,
+};
 
-use super::{utils::fill_record_set, BinseqRead, RecordSet, SingleEndRead};
-
-const DEFAULT_CAPACITY: usize = 2048;
+const DEFAULT_CAPACITY: usize = 10 * 1024;
 
 #[derive(Debug)]
 pub struct SingleReader<R: Read> {
@@ -118,3 +124,74 @@ impl<R: Read> BinseqRead for SingleReader<R> {
 }
 
 impl<R: Read> SingleEndRead for SingleReader<R> {}
+
+/// Implementation of parallel processing for single-end readers
+impl<R: Read + Send + Sync + 'static> SingleReader<R> {
+    /// Process records in parallel using the provided processor
+    pub fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+    ) -> Result<()> {
+        let config = self.config();
+
+        // Create shared reader
+        let reader = Arc::new(Mutex::new(self));
+
+        // Create processors for each thread
+        let processors = Arc::new(Mutex::new(
+            (0..num_threads)
+                .map(|_| processor.clone())
+                .collect::<Vec<_>>(),
+        ));
+
+        let mut handles = Vec::new();
+
+        // Spawn worker threads
+        for thread_id in 0..num_threads {
+            let reader = Arc::clone(&reader);
+            let processors = Arc::clone(&processors);
+
+            let handle = thread::spawn(move || -> Result<()> {
+                let mut record_set = RecordSet::new(DEFAULT_CAPACITY, config);
+
+                loop {
+                    // Fill this thread's record set
+                    let finished = {
+                        let mut reader = reader.lock().unwrap();
+                        reader.fill_external_set(&mut record_set)?
+                    };
+
+                    // Process records in this batch
+                    {
+                        let mut processors = processors.lock().unwrap();
+                        let processor = &mut processors[thread_id];
+
+                        for i in 0..record_set.n_records() {
+                            let record = record_set.get_record(i).unwrap();
+                            processor.process_record(record)?;
+                        }
+
+                        processor.on_batch_complete()?;
+                    }
+
+                    // Exit if we hit EOF and processed all records
+                    if finished && record_set.is_empty() {
+                        break;
+                    }
+                }
+
+                Ok(())
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
+
+        Ok(())
+    }
+}
