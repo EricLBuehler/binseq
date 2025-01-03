@@ -1,5 +1,7 @@
 use crate::{RecordConfig, RefRecord, RefRecordPair};
 
+pub const DEFAULT_CAPACITY: usize = 100 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct RecordSet {
     /// The raw buffer containing all flags
@@ -25,7 +27,7 @@ pub struct RecordSet {
 }
 
 impl RecordSet {
-    pub fn new(capacity: usize, config: RecordConfig) -> Self {
+    pub fn with_capacity(capacity: usize, config: RecordConfig) -> Self {
         Self {
             flags: Vec::with_capacity(capacity),
             buffer: Vec::with_capacity(capacity * config.n_chunks),
@@ -37,7 +39,11 @@ impl RecordSet {
         }
     }
 
-    pub fn new_paired(capacity: usize, sconfig: RecordConfig, xconfig: RecordConfig) -> Self {
+    pub fn with_capacity_paired(
+        capacity: usize,
+        sconfig: RecordConfig,
+        xconfig: RecordConfig,
+    ) -> Self {
         let buffer_size = capacity * (sconfig.n_chunks + xconfig.n_chunks);
         Self {
             flags: Vec::with_capacity(capacity),
@@ -48,6 +54,14 @@ impl RecordSet {
             xconfig,
             capacity,
         }
+    }
+
+    pub fn new(config: RecordConfig) -> Self {
+        Self::with_capacity(DEFAULT_CAPACITY, config)
+    }
+
+    pub fn new_paired(sconfig: RecordConfig, xconfig: RecordConfig) -> Self {
+        Self::with_capacity_paired(DEFAULT_CAPACITY, sconfig, xconfig)
     }
 
     pub fn n_records(&self) -> usize {
@@ -83,7 +97,9 @@ impl RecordSet {
         }
 
         let flag = self.flags[idx];
-        let s_start = idx * self.sconfig.n_chunks;
+        let pair_size = self.sconfig.n_chunks + self.xconfig.n_chunks;
+
+        let s_start = idx * pair_size;
         let s_end = s_start + self.sconfig.n_chunks;
         let x_start = s_end;
         let x_end = x_start + self.xconfig.n_chunks;

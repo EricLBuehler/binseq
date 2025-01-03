@@ -2,11 +2,11 @@ use anyhow::{bail, Result};
 use std::io::Read;
 
 use crate::{
-    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ReadError, RecordConfig, RefRecord,
-    RefRecordPair,
+    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ReadError, RecordConfig, RecordSet,
+    RefRecord, RefRecordPair,
 };
 
-use super::utils::{next_binseq, next_flag};
+use super::utils::fill_paired_record_set;
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {
@@ -16,20 +16,17 @@ pub struct PairedReader<R: Read> {
     /// Header of the file
     header: BinseqHeader,
 
-    /// Buffer for the flag
-    flag: u64,
-
-    /// Buffer for the primary sequence
-    sbuf: Vec<u64>,
-
-    /// Buffer for the extended sequence
-    xbuf: Vec<u64>,
+    /// Record set for paired reads
+    record_set: RecordSet,
 
     /// Configuration for the primary sequence
     sconfig: RecordConfig,
 
     /// Configuration for the extended sequence
     xconfig: RecordConfig,
+
+    /// Current position in the record set
+    pos: usize,
 
     /// Number of record pairs processed
     n_processed: usize,
@@ -43,72 +40,49 @@ impl<R: Read> PairedReader<R> {
         if header.xlen == 0 {
             bail!(ReadError::MissingPairedSequence(header.slen))
         }
+        let sconfig = RecordConfig::new(header.slen);
+        let xconfig = RecordConfig::new(header.xlen);
+        let record_set = RecordSet::new_paired(sconfig, xconfig);
         Ok(Self {
             inner,
             header,
-            flag: 0,
-            sbuf: Vec::new(),
-            xbuf: Vec::new(),
-            sconfig: RecordConfig::new(header.slen),
-            xconfig: RecordConfig::new(header.xlen),
+            record_set,
+            sconfig,
+            xconfig,
+            pos: 0,
             n_processed: 0,
             finished: false,
         })
     }
 
+    fn fill_record_set(&mut self) -> Result<bool> {
+        self.finished =
+            fill_paired_record_set(&mut self.inner, &mut self.record_set, &mut self.n_processed)?;
+        Ok(self.finished)
+    }
+
     fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
-        // Clear the last sequence buffer
-        self.sbuf.clear();
-        self.xbuf.clear();
-
-        // Read the flag
-        match next_flag(&mut self.inner, self.n_processed) {
-            Ok(Some(flag)) => {
-                self.flag = flag;
+        if self.record_set.is_empty() || self.pos == self.record_set.n_records() {
+            match self.fill_record_set() {
+                Ok(true) => {
+                    // EOF reached and no more records in set
+                    if self.record_set.is_empty() {
+                        return None;
+                    }
+                    self.pos = 0;
+                }
+                Ok(false) => {
+                    // More records in set and not EOF
+                    self.pos = 0;
+                }
+                Err(e) => return Some(Err(e)),
             }
-            Ok(None) => {
-                self.finished = true;
-                return None;
-            }
-            Err(e) => return Some(Err(e)),
         }
 
-        // Read the primary sequence
-        match next_binseq(
-            &mut self.inner,
-            &mut self.sbuf,
-            self.sconfig,
-            self.n_processed,
-        ) {
-            Ok(_) => {}
-            Err(e) => return Some(Err(e)),
-        }
+        let record = self.record_set.get_record_pair(self.pos)?;
+        self.pos += 1;
 
-        // Read the extended sequence
-        match next_binseq(
-            &mut self.inner,
-            &mut self.xbuf,
-            self.xconfig,
-            self.n_processed,
-        ) {
-            Ok(_) => {}
-            Err(e) => return Some(Err(e)),
-        }
-
-        // Create the record
-        let ref_record = RefRecordPair::new(
-            self.flag,
-            &self.sbuf,
-            &self.xbuf,
-            self.sconfig,
-            self.xconfig,
-        );
-
-        // Increment the number of processed records
-        self.n_processed += 1;
-
-        // Return the record as a reference
-        Some(Ok(ref_record))
+        Some(Ok(record))
     }
 }
 

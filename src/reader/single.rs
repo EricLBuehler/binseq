@@ -11,8 +11,6 @@ use crate::{
     SingleEndRead,
 };
 
-const DEFAULT_CAPACITY: usize = 10 * 1024;
-
 #[derive(Debug)]
 pub struct SingleReader<R: Read> {
     inner: R,
@@ -30,7 +28,7 @@ impl<R: Read> SingleReader<R> {
             bail!(ReadError::UnexpectedPairedBinseq(header.xlen))
         }
         let config = RecordConfig::new(header.slen);
-        let record_set = RecordSet::new(DEFAULT_CAPACITY, config);
+        let record_set = RecordSet::new(config);
         Ok(Self {
             inner,
             header,
@@ -153,7 +151,7 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
             let processors = Arc::clone(&processors);
 
             let handle = thread::spawn(move || -> Result<()> {
-                let mut record_set = RecordSet::new(DEFAULT_CAPACITY, config);
+                let mut record_set = RecordSet::new(config);
 
                 loop {
                     // Fill this thread's record set
