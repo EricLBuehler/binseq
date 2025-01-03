@@ -3,18 +3,17 @@ use std::io::Read;
 
 use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord};
 
-use super::{
-    utils::{next_binseq, next_flag},
-    BinseqRead, SingleEndRead,
-};
+use super::{utils::fill_record_set, BinseqRead, RecordSet, SingleEndRead};
+
+const DEFAULT_CAPACITY: usize = 2048;
 
 #[derive(Debug)]
 pub struct SingleReader<R: Read> {
     inner: R,
     header: BinseqHeader,
-    flag: u64,
-    buffer: Vec<u64>,
+    record_set: RecordSet,
     config: RecordConfig,
+    pos: usize,
     n_processed: usize,
     finished: bool,
 }
@@ -24,59 +23,70 @@ impl<R: Read> SingleReader<R> {
         if header.xlen != 0 {
             bail!(ReadError::UnexpectedPairedBinseq(header.xlen))
         }
-        let buffer = Vec::new();
-        let flag = 0;
         let config = RecordConfig::new(header.slen);
+        let record_set = RecordSet::new(DEFAULT_CAPACITY, config);
         Ok(Self {
             inner,
             header,
-            flag,
-            buffer,
+            record_set,
             config,
+            pos: 0,
             n_processed: 0,
             finished: false,
         })
     }
 
+    pub fn config(&self) -> RecordConfig {
+        self.config
+    }
+
+    fn fill_record_set(&mut self) -> Result<bool> {
+        self.finished =
+            fill_record_set(&mut self.inner, &mut self.record_set, &mut self.n_processed)?;
+        Ok(self.finished)
+    }
+
     fn next_record<'a>(&'a mut self) -> Option<Result<RefRecord<'a>>> {
-        // Clear the last sequence buffer
-        self.buffer.clear();
-
-        // Read the flag
-        match next_flag(&mut self.inner, self.n_processed) {
-            Ok(Some(flag)) => {
-                self.flag = flag;
+        if self.record_set.is_empty() || self.pos == self.record_set.n_records() {
+            match self.fill_record_set() {
+                Ok(true) => {
+                    // EOF reached and no more records in set
+                    if self.record_set.is_empty() {
+                        return None;
+                    }
+                    self.pos = 0;
+                }
+                Ok(false) => {
+                    // More records in set and not EOF
+                    self.pos = 0;
+                }
+                Err(e) => return Some(Err(e)),
             }
-            Ok(None) => {
-                self.finished = true;
-                return None;
-            }
-            Err(e) => return Some(Err(e)),
         }
 
-        // Read the sequence
-        match next_binseq(
-            &mut self.inner,
-            &mut self.buffer,
-            self.config,
-            self.n_processed,
-        ) {
-            Ok(_) => {}
-            Err(e) => return Some(Err(e)),
-        }
+        let record = self.record_set.get_record(self.pos)?;
+        self.pos += 1;
 
-        // Create the record
-        let ref_record = RefRecord::new(self.flag, &self.buffer, self.config);
-
-        // Increment the number of processed records
-        self.n_processed += 1;
-
-        // Return the record as a reference
-        Some(Ok(ref_record))
+        Some(Ok(record))
     }
 
     pub fn into_inner(self) -> R {
         self.inner
+    }
+
+    /// Fill an external record set with records
+    /// Returns true if EOF was reached, false if the record set was filled
+    pub fn fill_external_set(&mut self, record_set: &mut RecordSet) -> Result<bool> {
+        // Verify the external record set has compatible configuration
+        if record_set.config() != self.config {
+            bail!(ReadError::IncompatibleRecordSet(
+                self.config,
+                record_set.config(),
+            ));
+        }
+
+        // Use the existing fill_record_set utility function
+        fill_record_set(&mut self.inner, record_set, &mut self.n_processed)
     }
 }
 

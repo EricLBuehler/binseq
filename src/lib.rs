@@ -8,7 +8,7 @@ mod writer;
 pub use error::{HeaderError, ReadError, WriteError};
 pub use header::BinseqHeader;
 pub use reader::{
-    BinseqRead, PairedEndRead, PairedRead, PairedReader, SingleEndRead, SingleReader,
+    BinseqRead, PairedEndRead, PairedRead, PairedReader, RecordSet, SingleEndRead, SingleReader,
 };
 pub use record::{BinseqRecord, Record, RecordConfig, RefBytes, RefRecord, RefRecordPair};
 pub use utils::expected_file_size;
