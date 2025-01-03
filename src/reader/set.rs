@@ -1,4 +1,4 @@
-use crate::{RecordConfig, RefRecord};
+use crate::{RecordConfig, RefRecord, RefRecordPair};
 
 #[derive(Debug, Clone)]
 pub struct RecordSet {
@@ -15,7 +15,10 @@ pub struct RecordSet {
     current_pos: usize,
 
     /// Configuration for record sizing
-    config: RecordConfig,
+    sconfig: RecordConfig,
+
+    /// Configuration for record sizing
+    xconfig: RecordConfig,
 
     /// Maximum capacity of the record set
     capacity: usize,
@@ -28,7 +31,21 @@ impl RecordSet {
             buffer: Vec::with_capacity(capacity * config.n_chunks),
             n_records: 0,
             current_pos: 0,
-            config,
+            sconfig: config,
+            xconfig: config, // duplicated but unused
+            capacity,
+        }
+    }
+
+    pub fn new_paired(capacity: usize, sconfig: RecordConfig, xconfig: RecordConfig) -> Self {
+        let buffer_size = capacity * (sconfig.n_chunks + xconfig.n_chunks);
+        Self {
+            flags: Vec::with_capacity(capacity),
+            buffer: Vec::with_capacity(buffer_size),
+            n_records: 0,
+            current_pos: 0,
+            sconfig,
+            xconfig,
             capacity,
         }
     }
@@ -52,11 +69,35 @@ impl RecordSet {
         }
 
         let flag = self.flags[idx];
-        let start = idx * self.config.n_chunks;
-        let end = start + self.config.n_chunks;
+        let start = idx * self.sconfig.n_chunks;
+        let end = start + self.sconfig.n_chunks;
         let sequence = &self.buffer[start..end];
 
-        Some(RefRecord::new(flag, sequence, self.config))
+        Some(RefRecord::new(flag, sequence, self.sconfig))
+    }
+
+    // Get a reference to a record pair at specific index
+    pub fn get_record_pair(&self, idx: usize) -> Option<RefRecordPair> {
+        if idx >= self.n_records {
+            return None;
+        }
+
+        let flag = self.flags[idx];
+        let s_start = idx * self.sconfig.n_chunks;
+        let s_end = s_start + self.sconfig.n_chunks;
+        let x_start = s_end;
+        let x_end = x_start + self.xconfig.n_chunks;
+
+        let s_sequence = &self.buffer[s_start..s_end];
+        let x_sequence = &self.buffer[x_start..x_end];
+
+        Some(RefRecordPair::new(
+            flag,
+            s_sequence,
+            x_sequence,
+            self.sconfig,
+            self.xconfig,
+        ))
     }
 
     pub fn get_flags_mut(&mut self) -> &mut Vec<u64> {
@@ -75,8 +116,12 @@ impl RecordSet {
         self.current_pos = 0;
     }
 
-    pub fn config(&self) -> RecordConfig {
-        self.config
+    pub fn sconfig(&self) -> RecordConfig {
+        self.sconfig
+    }
+
+    pub fn xconfig(&self) -> RecordConfig {
+        self.xconfig
     }
 
     pub fn increment_records(&mut self) {

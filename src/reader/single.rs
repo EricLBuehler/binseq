@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use super::utils::fill_record_set;
+use super::utils::fill_single_record_set;
 use crate::{
     BinseqHeader, BinseqRead, ParallelProcessor, ReadError, RecordConfig, RecordSet, RefRecord,
     SingleEndRead,
@@ -48,7 +48,7 @@ impl<R: Read> SingleReader<R> {
 
     fn fill_record_set(&mut self) -> Result<bool> {
         self.finished =
-            fill_record_set(&mut self.inner, &mut self.record_set, &mut self.n_processed)?;
+            fill_single_record_set(&mut self.inner, &mut self.record_set, &mut self.n_processed)?;
         Ok(self.finished)
     }
 
@@ -84,15 +84,15 @@ impl<R: Read> SingleReader<R> {
     /// Returns true if EOF was reached, false if the record set was filled
     pub fn fill_external_set(&mut self, record_set: &mut RecordSet) -> Result<bool> {
         // Verify the external record set has compatible configuration
-        if record_set.config() != self.config {
+        if record_set.sconfig() != self.config {
             bail!(ReadError::IncompatibleRecordSet(
                 self.config,
-                record_set.config(),
+                record_set.sconfig(),
             ));
         }
 
         // Use the existing fill_record_set utility function
-        fill_record_set(&mut self.inner, record_set, &mut self.n_processed)
+        fill_single_record_set(&mut self.inner, record_set, &mut self.n_processed)
     }
 }
 

@@ -4,14 +4,14 @@ use std::io::Read;
 
 use crate::{ReadError, RecordConfig, RecordSet};
 
-pub fn fill_record_set<R: Read>(
+pub fn fill_single_record_set<R: Read>(
     reader: &mut R,
     record_set: &mut RecordSet,
     n_processed: &mut usize,
 ) -> Result<bool> {
     record_set.clear();
 
-    let config = record_set.config();
+    let config = record_set.sconfig();
 
     while !record_set.is_full() {
         match next_flag(reader, *n_processed) {
