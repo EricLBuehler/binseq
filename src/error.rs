@@ -1,3 +1,5 @@
+use crate::RecordConfig;
+
 #[derive(thiserror::Error, Debug)]
 pub enum HeaderError {
     #[error("Invalid magic number: {0}")]
@@ -23,6 +25,9 @@ pub enum ReadError {
 
     #[error("Missing paired sequence - found slen: {0} but xlen: 0")]
     MissingPairedSequence(u32),
+
+    #[error("Incompatible record set. Expected: {0:?}, Received: {1:?}")]
+    IncompatibleRecordSet(RecordConfig, RecordConfig),
 }
 
 #[derive(thiserror::Error, Debug)]

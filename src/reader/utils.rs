@@ -2,7 +2,80 @@ use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
-use crate::{ReadError, RecordConfig};
+use crate::{ReadError, RecordConfig, RecordSet};
+
+pub fn fill_single_record_set<R: Read>(
+    reader: &mut R,
+    record_set: &mut RecordSet,
+    n_processed: &mut usize,
+) -> Result<bool> {
+    record_set.clear();
+
+    let config = record_set.sconfig();
+
+    while !record_set.is_full() {
+        match next_flag(reader, *n_processed) {
+            Ok(Some(flag)) => {
+                // Read sequence
+                match next_binseq(reader, record_set.get_buffer_mut(), config, *n_processed) {
+                    Ok(_) => {
+                        record_set.get_flags_mut().push(flag);
+                        record_set.increment_records();
+                        *n_processed += 1;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(None) => {
+                return Ok(true); // EOF reached
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(false) // Not finished, just filled the buffer
+}
+
+pub fn fill_paired_record_set<R: Read>(
+    reader: &mut R,
+    record_set: &mut RecordSet,
+    n_processed: &mut usize,
+) -> Result<bool> {
+    // Clear the record set
+    record_set.clear();
+
+    let sconfig = record_set.sconfig();
+    let xconfig = record_set.xconfig();
+
+    while !record_set.is_full() {
+        // Read the flag
+        let flag = match next_flag(reader, *n_processed) {
+            Ok(Some(flag)) => anyhow::Ok(flag),
+            Ok(None) => {
+                return Ok(true); // EOF reached
+            }
+            Err(e) => return Err(e),
+        }?;
+
+        // Read the primary sequence
+        match next_binseq(reader, record_set.get_buffer_mut(), sconfig, *n_processed) {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+
+        // Read the extended sequence
+        match next_binseq(reader, record_set.get_buffer_mut(), xconfig, *n_processed) {
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+
+        record_set.get_flags_mut().push(flag);
+        record_set.increment_records();
+        *n_processed += 1;
+    }
+
+    Ok(false) // Not finished, just filled the buffer
+}
 
 /// Read the next flag from the reader
 ///

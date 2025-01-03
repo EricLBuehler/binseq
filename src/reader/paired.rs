@@ -1,12 +1,16 @@
 use anyhow::{bail, Result};
-use std::io::Read;
-
-use crate::{BinseqHeader, ReadError, RecordConfig, RefRecord, RefRecordPair};
-
-use super::{
-    utils::{next_binseq, next_flag},
-    BinseqRead, PairedEndRead, PairedRead,
+use std::{
+    io::Read,
+    sync::{Arc, Mutex},
+    thread,
 };
+
+use crate::{
+    BinseqHeader, BinseqRead, PairedEndRead, PairedRead, ParallelPairedProcessor, ReadError,
+    RecordConfig, RecordSet, RefRecord, RefRecordPair,
+};
+
+use super::utils::fill_paired_record_set;
 
 #[derive(Debug)]
 pub struct PairedReader<R: Read> {
@@ -16,20 +20,17 @@ pub struct PairedReader<R: Read> {
     /// Header of the file
     header: BinseqHeader,
 
-    /// Buffer for the flag
-    flag: u64,
-
-    /// Buffer for the primary sequence
-    sbuf: Vec<u64>,
-
-    /// Buffer for the extended sequence
-    xbuf: Vec<u64>,
+    /// Record set for paired reads
+    record_set: RecordSet,
 
     /// Configuration for the primary sequence
     sconfig: RecordConfig,
 
     /// Configuration for the extended sequence
     xconfig: RecordConfig,
+
+    /// Current position in the record set
+    pos: usize,
 
     /// Number of record pairs processed
     n_processed: usize,
@@ -43,72 +44,71 @@ impl<R: Read> PairedReader<R> {
         if header.xlen == 0 {
             bail!(ReadError::MissingPairedSequence(header.slen))
         }
+        let sconfig = RecordConfig::new(header.slen);
+        let xconfig = RecordConfig::new(header.xlen);
+        let record_set = RecordSet::new_paired(sconfig, xconfig);
         Ok(Self {
             inner,
             header,
-            flag: 0,
-            sbuf: Vec::new(),
-            xbuf: Vec::new(),
-            sconfig: RecordConfig::new(header.slen),
-            xconfig: RecordConfig::new(header.xlen),
+            record_set,
+            sconfig,
+            xconfig,
+            pos: 0,
             n_processed: 0,
             finished: false,
         })
     }
 
+    fn fill_record_set(&mut self) -> Result<bool> {
+        self.finished =
+            fill_paired_record_set(&mut self.inner, &mut self.record_set, &mut self.n_processed)?;
+        Ok(self.finished)
+    }
+
     fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
-        // Clear the last sequence buffer
-        self.sbuf.clear();
-        self.xbuf.clear();
-
-        // Read the flag
-        match next_flag(&mut self.inner, self.n_processed) {
-            Ok(Some(flag)) => {
-                self.flag = flag;
+        if self.record_set.is_empty() || self.pos == self.record_set.n_records() {
+            match self.fill_record_set() {
+                Ok(true) => {
+                    // EOF reached and no more records in set
+                    if self.record_set.is_empty() {
+                        return None;
+                    }
+                    self.pos = 0;
+                }
+                Ok(false) => {
+                    // More records in set and not EOF
+                    self.pos = 0;
+                }
+                Err(e) => return Some(Err(e)),
             }
-            Ok(None) => {
-                self.finished = true;
-                return None;
-            }
-            Err(e) => return Some(Err(e)),
         }
 
-        // Read the primary sequence
-        match next_binseq(
-            &mut self.inner,
-            &mut self.sbuf,
-            self.sconfig,
-            self.n_processed,
-        ) {
-            Ok(_) => {}
-            Err(e) => return Some(Err(e)),
+        let record = self.record_set.get_record_pair(self.pos)?;
+        self.pos += 1;
+
+        Some(Ok(record))
+    }
+
+    /// Fill an external record set with records
+    /// Returns true if EOF was reached, false if the record set was filled
+    pub fn fill_external_set(&mut self, record_set: &mut RecordSet) -> Result<bool> {
+        // Verify the external record set has compatible configuration
+        if record_set.sconfig() != self.sconfig {
+            bail!(ReadError::IncompatibleRecordSet(
+                self.sconfig,
+                record_set.sconfig(),
+            ));
         }
 
-        // Read the extended sequence
-        match next_binseq(
-            &mut self.inner,
-            &mut self.xbuf,
-            self.xconfig,
-            self.n_processed,
-        ) {
-            Ok(_) => {}
-            Err(e) => return Some(Err(e)),
+        if record_set.xconfig() != self.xconfig {
+            bail!(ReadError::IncompatibleRecordSet(
+                self.xconfig,
+                record_set.xconfig(),
+            ));
         }
 
-        // Create the record
-        let ref_record = RefRecordPair::new(
-            self.flag,
-            &self.sbuf,
-            &self.xbuf,
-            self.sconfig,
-            self.xconfig,
-        );
-
-        // Increment the number of processed records
-        self.n_processed += 1;
-
-        // Return the record as a reference
-        Some(Ok(ref_record))
+        // Use the existing fill_record_set utility function
+        fill_paired_record_set(&mut self.inner, record_set, &mut self.n_processed)
     }
 }
 
@@ -156,3 +156,75 @@ impl<R: Read> PairedRead for PairedReader<R> {
 }
 
 impl<R: Read> PairedEndRead for PairedReader<R> {}
+
+/// Implementation of parallel processing for single-end readers
+impl<R: Read + Send + Sync + 'static> PairedReader<R> {
+    /// Process records in parallel using the provided processor
+    pub fn process_parallel<P: ParallelPairedProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+    ) -> Result<()> {
+        let sconfig = self.sconfig;
+        let xconfig = self.xconfig;
+
+        // Create shared reader
+        let reader = Arc::new(Mutex::new(self));
+
+        // Create processors for each thread
+        let processors = Arc::new(Mutex::new(
+            (0..num_threads)
+                .map(|_| processor.clone())
+                .collect::<Vec<_>>(),
+        ));
+
+        let mut handles = Vec::new();
+
+        // Spawn worker threads
+        for thread_id in 0..num_threads {
+            let reader = Arc::clone(&reader);
+            let processors = Arc::clone(&processors);
+
+            let handle = thread::spawn(move || -> Result<()> {
+                let mut record_set = RecordSet::new_paired(sconfig, xconfig);
+
+                loop {
+                    // Fill this thread's record set
+                    let finished = {
+                        let mut reader = reader.lock().unwrap();
+                        reader.fill_external_set(&mut record_set)?
+                    };
+
+                    // Process records in this batch
+                    {
+                        let mut processors = processors.lock().unwrap();
+                        let processor = &mut processors[thread_id];
+
+                        for i in 0..record_set.n_records() {
+                            let pair = record_set.get_record_pair(i).unwrap();
+                            processor.process_record_pair(pair)?;
+                        }
+
+                        processor.on_batch_complete()?;
+                    }
+
+                    // Exit if we hit EOF and processed all records
+                    if finished && record_set.is_empty() {
+                        break;
+                    }
+                }
+
+                Ok(())
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
+
+        Ok(())
+    }
+}

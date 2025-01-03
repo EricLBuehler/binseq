@@ -1,52 +1,40 @@
-use super::{BinseqRecord, RefBytes};
+use super::{BinseqRecord, Record, RefBytes};
 use crate::RecordConfig;
 
-#[derive(Debug, Clone)]
-pub struct Record {
+#[derive(Debug)]
+pub struct RefRecord<'a> {
     /// The 8-byte flag
     pub flag: u64,
 
     /// The 2-bit encoded sequence
-    pub sequence: Vec<u64>,
+    pub sequence: RefBytes<'a>,
 
     /// Sizing information for the record
     pub config: RecordConfig,
 }
-
-impl Record {
-    pub fn new<'a>(flag: u64, sequence: Vec<u64>, config: RecordConfig) -> Self {
+impl<'a> RefRecord<'a> {
+    pub fn new(flag: u64, sequence: RefBytes<'a>, config: RecordConfig) -> Self {
         Self {
             flag,
             sequence,
             config,
         }
     }
-
-    pub fn empty() -> Self {
-        Self {
-            flag: 0,
-            sequence: Vec::new(),
-            config: RecordConfig::new(0),
-        }
+    pub fn to_owned(&self) -> Record {
+        Record::new(self.flag, self.sequence.to_vec(), self.config)
     }
-
-    pub fn update(&mut self, flag: u64, sequence: RefBytes, config: RecordConfig) {
-        self.flag = flag;
-        self.sequence.clear();
-        self.sequence.extend_from_slice(sequence);
-        self.config = config;
+    pub fn update_record(&self, record: &mut Record) {
+        record.update(self.flag, self.sequence, self.config);
     }
 }
 
-impl BinseqRecord for Record {
+impl<'a> BinseqRecord for RefRecord<'a> {
     fn flag(&self) -> u64 {
         self.flag
     }
-
     fn sequence(&self) -> RefBytes {
         &self.sequence
     }
-
     fn config(&self) -> RecordConfig {
         self.config
     }
@@ -69,7 +57,7 @@ mod testing {
         let ebuf = embed_sequence(seq);
         let config = RecordConfig::new(seq.len() as u32);
 
-        let record = Record::new(0, ebuf, config);
+        let record = RefRecord::new(0, ebuf.as_slice(), config);
 
         // First 4 bases
         let subseq = record.decode_subsequence_alloc(0..4)?;
@@ -96,7 +84,7 @@ mod testing {
         let ebuf = embed_sequence(seq);
         let config = RecordConfig::new(seq.len() as u32);
 
-        let record = Record::new(0, ebuf, config);
+        let record = RefRecord::new(0, ebuf.as_slice(), config);
 
         // First 4 bases
         let subseq = record.decode_subsequence_alloc(0..4)?;

@@ -1,5 +1,5 @@
 /// Sizing information for records
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordConfig {
     /// The length of the sequence
     pub slen: u32,

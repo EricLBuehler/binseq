@@ -5,7 +5,9 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-use binseq::{BinseqHeader, BinseqRead, BinseqWriter, PairedRead, PairedReader, SingleReader};
+use binseq::{
+    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, PairedRead, PairedReader, SingleReader,
+};
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
     // Open the input FASTQ file
@@ -159,13 +161,13 @@ fn read_write_paired(
 
 fn main() -> Result<()> {
     // INPUT ARGUMENTS
-    let fastq_path_r1 = "./data/subset_R1.fastq.gz";
-    let fastq_path_r2 = "./data/subset_R2.fastq.gz";
-    let binseq_path_r1 = "./data/subset_R1.bq";
-    let binseq_path_r2 = "./data/subset_R2.bq";
-    let binseq_path = "./data/subset.bq";
-    let seq_size_r1 = 28;
-    let seq_size_r2 = 90;
+    let fastq_path_r1 = "./data/subset_R1.fastq.gz"; // exists
+    let fastq_path_r2 = "./data/subset_R2.fastq.gz"; // exists
+    let binseq_path_r1 = "./data/subset_R1.bq"; // created
+    let binseq_path_r2 = "./data/subset_R2.bq"; // created
+    let binseq_path = "./data/subset.bq"; // created
+    let seq_size_r1 = 28; // a priori known
+    let seq_size_r2 = 90; // a priori known
 
     read_write_single(fastq_path_r1, binseq_path_r1, seq_size_r1)?;
     read_write_single(fastq_path_r2, binseq_path_r2, seq_size_r2)?;
