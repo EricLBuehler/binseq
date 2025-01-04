@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
 use std::{fs::File, path::Path, sync::Arc};
 
@@ -70,51 +69,11 @@ impl PairedMmapReader {
     }
 
     fn fill_record_set(&mut self) -> Result<bool> {
-        self.record_set.clear();
-        let record_size = self.record_size();
-
-        let sconfig = self.record_set.sconfig();
-        let xconfig = self.record_set.xconfig();
-
-        while !self.record_set.is_full() {
-            // Check if we've reached the end of the file
-            if self.offset + record_size > self.mmap.len() {
-                return Ok(true);
-            }
-
-            // Read flag
-            let flag_bytes = &self.mmap[self.offset..self.offset + 8];
-            let flag = LittleEndian::read_u64(flag_bytes);
-            self.offset += 8;
-
-            // Read primary sequence chunks directly into record set buffer
-            let buffer = self.record_set.get_buffer_mut();
-
-            // Read primary sequence
-            unsafe {
-                let src_ptr = self.mmap[self.offset..self.offset + (sconfig.n_chunks * 8)].as_ptr()
-                    as *const u64;
-                let chunk_slice = std::slice::from_raw_parts(src_ptr, sconfig.n_chunks);
-                buffer.extend_from_slice(chunk_slice);
-            }
-            self.offset += sconfig.n_chunks * 8;
-
-            // Read extended sequence
-            unsafe {
-                let src_ptr = self.mmap[self.offset..self.offset + (xconfig.n_chunks * 8)].as_ptr()
-                    as *const u64;
-                let chunk_slice = std::slice::from_raw_parts(src_ptr, xconfig.n_chunks);
-                buffer.extend_from_slice(chunk_slice);
-            }
-            self.offset += xconfig.n_chunks * 8;
-
-            // Add flag and increment counters
-            self.record_set.get_flags_mut().push(flag);
-            self.record_set.increment_records();
-            self.n_processed += 1;
-        }
-
-        Ok(false)
+        let finished =
+            self.record_set
+                .fill_from_mmap_paired(&self.mmap, &mut self.offset, self.mmap.len())?;
+        self.n_processed += self.record_set.n_records();
+        Ok(finished)
     }
 
     fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
@@ -157,13 +116,11 @@ impl PairedMmapReader {
             ));
         }
 
-        record_set.clear();
-        let record_size = self.record_size();
-
-        record_set.fill_from_mmap_single(&self.mmap, &mut self.offset, self.mmap.len())?;
-        self.n_processed += record_set.n_records();
-
-        Ok(self.offset + record_size > self.mmap.len())
+        let finished =
+            self.record_set
+                .fill_from_mmap_paired(&self.mmap, &mut self.offset, self.mmap.len())?;
+        self.n_processed += self.record_set.n_records();
+        Ok(finished)
     }
 }
 
