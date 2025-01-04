@@ -6,7 +6,8 @@ use std::{
 };
 
 use binseq::{
-    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, PairedRead, PairedReader, SingleReader,
+    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, MmapReader, PairedMmapReader, PairedRead,
+    PairedReader, SingleReader,
 };
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
@@ -44,6 +45,30 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     // Read the binary sequence
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let mut reader = SingleReader::new(bufreader)?;
+    let mut num_records_read = 0;
+    let mut record_buffer = Vec::new();
+    while let Some(record) = reader.next() {
+        let record = record?;
+
+        record.decode(&mut record_buffer)?;
+
+        // Check if the decoded sequence matches the original
+        let buf_str = std::str::from_utf8(&record_buffer)?;
+        let seq_str = std::str::from_utf8(&all_sequences[num_records_read])?;
+        assert_eq!(buf_str, seq_str);
+
+        num_records_read += 1;
+        record_buffer.clear();
+    }
+    eprintln!("Finished reading {} records (mmap)", num_records_read);
+    eprintln!(
+        "Difference in total records: {}",
+        num_records_write - num_records_read
+    );
+    eprintln!("Number of records in vec: {}", all_sequences.len());
+
+    // Read the binary sequence with mmap
+    let mut reader = MmapReader::new(binseq_path)?;
     let mut num_records_read = 0;
     let mut record_buffer = Vec::new();
     while let Some(record) = reader.next() {
@@ -130,6 +155,34 @@ fn read_write_paired(
 
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let mut reader = PairedReader::new(bufreader)?;
+    let mut sbuf = Vec::new();
+    let mut xbuf = Vec::new();
+
+    let mut n_processed = 0;
+    while let Some(pair) = reader.next_paired() {
+        let pair = pair?;
+        pair.decode_s(&mut sbuf)?;
+        pair.decode_x(&mut xbuf)?;
+
+        // Check if the decoded sequence matches the original
+        let s_str = std::str::from_utf8(&sbuf)?;
+        let x_str = std::str::from_utf8(&xbuf)?;
+
+        let s_exp = std::str::from_utf8(&r1_storage[n_processed])?;
+        let x_exp = std::str::from_utf8(&r2_storage[n_processed])?;
+
+        assert_eq!(s_str, s_exp);
+        assert_eq!(x_str, x_exp);
+
+        sbuf.clear();
+        xbuf.clear();
+
+        n_processed += 1;
+    }
+    eprintln!("Finished reading {} records", n_processed);
+
+    // Read the binary sequence with mmap
+    let mut reader = PairedMmapReader::new(binseq_path)?;
     let mut sbuf = Vec::new();
     let mut xbuf = Vec::new();
 

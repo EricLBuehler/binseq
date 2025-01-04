@@ -1,3 +1,7 @@
+use anyhow::Result;
+use byteorder::{ByteOrder, LittleEndian};
+use memmap2::Mmap;
+
 use crate::{RecordConfig, RefRecord, RefRecordPair};
 
 pub const DEFAULT_CAPACITY: usize = 128 * 1024;
@@ -142,5 +146,114 @@ impl RecordSet {
 
     pub fn increment_records(&mut self) {
         self.n_records += 1;
+    }
+}
+
+/// Memory-mapped record set
+impl RecordSet {
+    /// Fills the record set from a memory mapped file, handling single-end data
+    /// Returns true if EOF was reached, false if the record set was filled
+    ///
+    /// This method is specific to single-end data, reading data directly from the memory mapped file
+    /// into the internal buffers.
+    pub fn fill_from_mmap_single(
+        &mut self,
+        mmap: &Mmap,
+        offset: &mut usize,
+        end_offset: usize,
+    ) -> Result<bool> {
+        self.clear();
+        let record_size = 8 + (self.sconfig.n_chunks * 8); // flag + sequence
+        let config = self.sconfig;
+
+        while !self.is_full() {
+            // Check if we've reached our assigned chunk end
+            if *offset + record_size > end_offset {
+                return Ok(true);
+            }
+
+            // Read flag
+            let flag_bytes = &mmap[*offset..*offset + 8];
+            let flag = LittleEndian::read_u64(flag_bytes);
+            *offset += 8;
+
+            // Read sequence chunks
+            let buffer = self.get_buffer_mut();
+
+            // Safety: We've verified the range is within bounds
+            unsafe {
+                let src_ptr = mmap[*offset..*offset + (config.n_chunks * 8)].as_ptr() as *const u64;
+                let chunk_slice = std::slice::from_raw_parts(src_ptr, config.n_chunks);
+                buffer.extend_from_slice(chunk_slice);
+            }
+            *offset += self.sconfig.n_chunks * 8;
+
+            self.get_flags_mut().push(flag);
+            self.increment_records();
+        }
+
+        Ok(false)
+    }
+
+    /// Fills the record set from a memory mapped file, handling paired-end data
+    /// Returns true if EOF was reached, false if the record set was filled
+    ///
+    /// This method is specific to paired-end data, handling both primary and extended sequences.
+    /// It reads data directly from the memory mapped file into the internal buffers.
+    pub fn fill_from_mmap_paired(
+        &mut self,
+        mmap: &Mmap,
+        offset: &mut usize,
+        end_offset: usize,
+    ) -> Result<bool> {
+        // Clear existing data
+        self.clear();
+
+        // Calculate total record size including flag and both sequences
+        let pair_size = self.sconfig.n_chunks + self.xconfig.n_chunks;
+        let record_size = 8 + (pair_size * 8); // flag (8 bytes) + sequence chunks
+
+        let sconfig = self.sconfig;
+        let xconfig = self.xconfig;
+
+        while !self.is_full() {
+            // Check if we've reached the end of our assigned chunk
+            if *offset + record_size > end_offset {
+                return Ok(true);
+            }
+
+            // Read the flag
+            let flag_bytes = &mmap[*offset..*offset + 8];
+            let flag = LittleEndian::read_u64(flag_bytes);
+            *offset += 8;
+
+            let buffer = self.get_buffer_mut();
+
+            // Read primary sequence (R1)
+            // Safety: We've verified the range is within bounds above
+            unsafe {
+                let src_ptr =
+                    mmap[*offset..*offset + (sconfig.n_chunks * 8)].as_ptr() as *const u64;
+                let chunk_slice = std::slice::from_raw_parts(src_ptr, sconfig.n_chunks);
+                buffer.extend_from_slice(chunk_slice);
+            }
+            *offset += sconfig.n_chunks * 8;
+
+            // Read extended sequence (R2)
+            // Safety: We've verified the range is within bounds above
+            unsafe {
+                let src_ptr =
+                    mmap[*offset..*offset + (xconfig.n_chunks * 8)].as_ptr() as *const u64;
+                let chunk_slice = std::slice::from_raw_parts(src_ptr, xconfig.n_chunks);
+                buffer.extend_from_slice(chunk_slice);
+            }
+            *offset += self.xconfig.n_chunks * 8;
+
+            // Add the flag and increment our record count
+            self.get_flags_mut().push(flag);
+            self.increment_records();
+        }
+
+        Ok(false)
     }
 }

@@ -12,15 +12,27 @@ use std::{
 
 #[derive(Clone, Default)]
 pub struct MyProcessor {
+    local_counter: usize,
     counter: Arc<AtomicUsize>,
     sbuf: Vec<u8>,
     xbuf: Vec<u8>,
+}
+impl MyProcessor {
+    pub fn counter(&self) -> usize {
+        self.counter.load(Ordering::Relaxed)
+    }
 }
 impl ParallelProcessor for MyProcessor {
     fn process_record(&mut self, record: RefRecord) -> Result<()> {
         self.sbuf.clear();
         record.decode(&mut self.sbuf)?;
-        self.counter.fetch_add(1, Ordering::Relaxed);
+        self.local_counter += 1;
+        Ok(())
+    }
+    fn on_batch_complete(&mut self) -> Result<()> {
+        self.counter
+            .fetch_add(self.local_counter, Ordering::Relaxed);
+        self.local_counter = 0;
         Ok(())
     }
 }
@@ -30,7 +42,13 @@ impl ParallelPairedProcessor for MyProcessor {
         self.xbuf.clear();
         pair.decode_s(&mut self.sbuf)?;
         pair.decode_x(&mut self.xbuf)?;
-        self.counter.fetch_add(1, Ordering::Relaxed);
+        self.local_counter += 1;
+        Ok(())
+    }
+    fn on_batch_complete(&mut self) -> Result<()> {
+        self.counter
+            .fetch_add(self.local_counter, Ordering::Relaxed);
+        self.local_counter = 0;
         Ok(())
     }
 }
@@ -54,6 +72,23 @@ fn sequential_processing(binseq_path: &str) -> Result<()> {
     Ok(())
 }
 
+fn mmap_processing(binseq_path: &str) -> Result<()> {
+    let mut reader = MmapReader::new(binseq_path)?;
+    let mut proc = MyProcessor::default();
+    while let Some(record) = reader.next() {
+        let record = record?;
+        proc.process_record(record)?;
+    }
+    Ok(())
+}
+
+fn mmap_processing_parallel(binseq_path: &str, n_threads: usize) -> Result<()> {
+    let reader = MmapReader::new(binseq_path)?;
+    let proc = MyProcessor::default();
+    reader.process_parallel(proc.clone(), n_threads)?;
+    Ok(())
+}
+
 fn paired_sequential_processing(binseq_path: &str) -> Result<()> {
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let mut reader = PairedReader::new(bufreader)?;
@@ -68,6 +103,23 @@ fn paired_sequential_processing(binseq_path: &str) -> Result<()> {
 fn paired_native_parallel_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let reader = PairedReader::new(bufreader)?;
+    let proc = MyProcessor::default();
+    reader.process_parallel(proc.clone(), n_threads)?;
+    Ok(())
+}
+
+fn paired_mmap_processing(binseq_path: &str) -> Result<()> {
+    let mut reader = PairedMmapReader::new(binseq_path)?;
+    let mut proc = MyProcessor::default();
+    while let Some(pair) = reader.next_paired() {
+        let pair = pair?;
+        proc.process_record_pair(pair)?;
+    }
+    Ok(())
+}
+
+fn paired_mmap_processing_parallel(binseq_path: &str, n_threads: usize) -> Result<()> {
+    let reader = PairedMmapReader::new(binseq_path)?;
     let proc = MyProcessor::default();
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
@@ -96,13 +148,37 @@ pub fn main() -> Result<()> {
         "single - sequential_processing",
     );
 
-    for n_threads in vec![2, 4, 8, 16] {
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
         time_it(
             || {
                 native_parallel_processing(binseq_path_single, n_threads)?;
                 Ok(())
             },
             &format!("single - parallel_processing ({})", n_threads),
+        );
+    }
+
+    time_it(
+        || {
+            mmap_processing(binseq_path_single)?;
+            Ok(())
+        },
+        "single - mmap_processing",
+    );
+
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
+        time_it(
+            || {
+                mmap_processing_parallel(binseq_path_single, n_threads)?;
+                Ok(())
+            },
+            &format!("single - mmap_parallel_processing ({})", n_threads),
         );
     }
 
@@ -122,13 +198,37 @@ pub fn main() -> Result<()> {
         "paired - sequential_processing",
     );
 
-    for n_threads in vec![2, 4, 8, 16] {
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
         time_it(
             || {
                 paired_native_parallel_processing(binseq_path_paired, n_threads)?;
                 Ok(())
             },
             &format!("paired - parallel_processing ({})", n_threads),
+        );
+    }
+
+    time_it(
+        || {
+            paired_mmap_processing(binseq_path_paired)?;
+            Ok(())
+        },
+        "paired - mmap_processing",
+    );
+
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
+        time_it(
+            || {
+                paired_mmap_processing_parallel(binseq_path_paired, n_threads)?;
+                Ok(())
+            },
+            &format!("paired - mmap_parallel_processing ({})", n_threads),
         );
     }
 
