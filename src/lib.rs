@@ -10,8 +10,8 @@ pub use error::{HeaderError, ReadError, WriteError};
 pub use header::BinseqHeader;
 pub use parallel::{ParallelPairedProcessor, ParallelProcessor};
 pub use reader::{
-    BinseqRead, MmapReader, PairedEndRead, PairedRead, PairedReader, RecordSet, SingleEndRead,
-    SingleReader,
+    BinseqRead, MmapReader, PairedEndRead, PairedMmapReader, PairedRead, PairedReader, RecordSet,
+    SingleEndRead, SingleReader,
 };
 pub use record::{BinseqRecord, Record, RecordConfig, RefBytes, RefRecord, RefRecordPair};
 pub use utils::expected_file_size;
