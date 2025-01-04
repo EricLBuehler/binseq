@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
 use std::{fs::File, path::Path, sync::Arc};
 
@@ -69,41 +68,11 @@ impl MmapReader {
     }
 
     fn fill_record_set(&mut self) -> Result<bool> {
-        self.record_set.clear();
-        let record_size = self.record_size();
-
-        let config = self.record_set.sconfig();
-        while !self.record_set.is_full() {
-            // Check if we've reached the end of the file
-            if self.offset + record_size > self.mmap.len() {
-                return Ok(true);
-            }
-
-            // Read flag
-            let flag_bytes = &self.mmap[self.offset..self.offset + 8];
-            let flag = LittleEndian::read_u64(flag_bytes);
-            self.offset += 8;
-
-            // Read sequence chunks directly into record set buffer
-            let buffer = self.record_set.get_buffer_mut();
-            let chunk_size = config.n_chunks;
-
-            // Safety: We've verified the range is within bounds
-            unsafe {
-                let src_ptr =
-                    self.mmap[self.offset..self.offset + (chunk_size * 8)].as_ptr() as *const u64;
-                let chunk_slice = std::slice::from_raw_parts(src_ptr, chunk_size);
-                buffer.extend_from_slice(chunk_slice);
-            }
-            self.offset += chunk_size * 8;
-
-            // Add flag and increment counters
-            self.record_set.get_flags_mut().push(flag);
-            self.record_set.increment_records();
-            self.n_processed += 1;
-        }
-
-        Ok(false)
+        let finished =
+            self.record_set
+                .fill_from_mmap_single(&self.mmap, &mut self.offset, self.mmap.len())?;
+        self.n_processed += self.record_set.n_records();
+        Ok(finished)
     }
 
     fn next_record<'a>(&'a mut self) -> Option<Result<RefRecord<'a>>> {
@@ -139,41 +108,10 @@ impl MmapReader {
             ));
         }
 
-        record_set.clear();
-        let record_size = self.record_size();
-        let config = record_set.sconfig();
-
-        while !record_set.is_full() {
-            // Check if we've reached the end of the file
-            if self.offset + record_size > self.mmap.len() {
-                return Ok(true);
-            }
-
-            // Read flag
-            let flag_bytes = &self.mmap[self.offset..self.offset + 8];
-            let flag = LittleEndian::read_u64(flag_bytes);
-            self.offset += 8;
-
-            // Read sequence chunks directly into record set buffer
-            let buffer = record_set.get_buffer_mut();
-            let chunk_size = config.n_chunks;
-
-            // Safety: We've verified the range is within bounds
-            unsafe {
-                let src_ptr =
-                    self.mmap[self.offset..self.offset + (chunk_size * 8)].as_ptr() as *const u64;
-                let chunk_slice = std::slice::from_raw_parts(src_ptr, chunk_size);
-                buffer.extend_from_slice(chunk_slice);
-            }
-            self.offset += chunk_size * 8;
-
-            // Add flag and increment counters
-            record_set.get_flags_mut().push(flag);
-            record_set.increment_records();
-            self.n_processed += 1;
-        }
-
-        Ok(false)
+        let finished =
+            record_set.fill_from_mmap_single(&self.mmap, &mut self.offset, self.mmap.len())?;
+        self.n_processed += record_set.n_records();
+        Ok(finished)
     }
 }
 
