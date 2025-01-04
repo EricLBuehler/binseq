@@ -108,6 +108,23 @@ fn paired_native_parallel_processing(binseq_path: &str, n_threads: usize) -> Res
     Ok(())
 }
 
+fn paired_mmap_processing(binseq_path: &str) -> Result<()> {
+    let mut reader = PairedMmapReader::new(binseq_path)?;
+    let mut proc = MyProcessor::default();
+    while let Some(pair) = reader.next_paired() {
+        let pair = pair?;
+        proc.process_record_pair(pair)?;
+    }
+    Ok(())
+}
+
+fn paired_mmap_processing_parallel(binseq_path: &str, n_threads: usize) -> Result<()> {
+    let reader = PairedMmapReader::new(binseq_path)?;
+    let proc = MyProcessor::default();
+    reader.process_parallel(proc.clone(), n_threads)?;
+    Ok(())
+}
+
 pub fn main() -> Result<()> {
     let binseq_path_single = "./data/test.bq";
     let binseq_path_paired = "./data/test_paired.bq";
@@ -173,23 +190,47 @@ pub fn main() -> Result<()> {
     //     "write_paired",
     // );
 
-    // time_it(
-    //     || {
-    //         paired_sequential_processing(binseq_path_paired)?;
-    //         Ok(())
-    //     },
-    //     "paired - sequential_processing",
-    // );
+    time_it(
+        || {
+            paired_sequential_processing(binseq_path_paired)?;
+            Ok(())
+        },
+        "paired - sequential_processing",
+    );
 
-    // for n_threads in vec![2, 4, 8, 16] {
-    //     time_it(
-    //         || {
-    //             paired_native_parallel_processing(binseq_path_paired, n_threads)?;
-    //             Ok(())
-    //         },
-    //         &format!("paired - parallel_processing ({})", n_threads),
-    //     );
-    // }
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
+        time_it(
+            || {
+                paired_native_parallel_processing(binseq_path_paired, n_threads)?;
+                Ok(())
+            },
+            &format!("paired - parallel_processing ({})", n_threads),
+        );
+    }
+
+    time_it(
+        || {
+            paired_mmap_processing(binseq_path_paired)?;
+            Ok(())
+        },
+        "paired - mmap_processing",
+    );
+
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
+        time_it(
+            || {
+                paired_mmap_processing_parallel(binseq_path_paired, n_threads)?;
+                Ok(())
+            },
+            &format!("paired - mmap_parallel_processing ({})", n_threads),
+        );
+    }
 
     Ok(())
 }
