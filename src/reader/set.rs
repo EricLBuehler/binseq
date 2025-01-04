@@ -1,6 +1,6 @@
 use crate::{RecordConfig, RefRecord, RefRecordPair};
 
-pub const DEFAULT_CAPACITY: usize = 100 * 1024;
+pub const DEFAULT_CAPACITY: usize = 128 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct RecordSet {

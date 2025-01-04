@@ -136,19 +136,12 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
         // Create shared reader
         let reader = Arc::new(Mutex::new(self));
 
-        // Create processors for each thread
-        let processors = Arc::new(Mutex::new(
-            (0..num_threads)
-                .map(|_| processor.clone())
-                .collect::<Vec<_>>(),
-        ));
-
         let mut handles = Vec::new();
 
         // Spawn worker threads
-        for thread_id in 0..num_threads {
-            let reader = Arc::clone(&reader);
-            let processors = Arc::clone(&processors);
+        for _tid in 0..num_threads {
+            let reader = Arc::clone(&reader); // Clone for each thread
+            let mut processor = processor.clone(); // Clone for each thread
 
             let handle = thread::spawn(move || -> Result<()> {
                 let mut record_set = RecordSet::new(config);
@@ -161,17 +154,11 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
                     };
 
                     // Process records in this batch
-                    {
-                        let mut processors = processors.lock().unwrap();
-                        let processor = &mut processors[thread_id];
-
-                        for i in 0..record_set.n_records() {
-                            let record = record_set.get_record(i).unwrap();
-                            processor.process_record(record)?;
-                        }
-
-                        processor.on_batch_complete()?;
+                    for i in 0..record_set.n_records() {
+                        let record = record_set.get_record(i).unwrap();
+                        processor.process_record(record)?;
                     }
+                    processor.on_batch_complete()?;
 
                     // Exit if we hit EOF and processed all records
                     if finished && record_set.is_empty() {
@@ -193,3 +180,96 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
         Ok(())
     }
 }
+
+// use std::sync::atomic::{AtomicUsize, Ordering};
+// use std::time::Instant;
+
+// #[derive(Default)]
+// struct ThreadMetrics {
+//     read_time: AtomicUsize,
+//     process_time: AtomicUsize,
+//     wait_time: AtomicUsize,
+//     iterations: AtomicUsize,
+// }
+
+// impl<R: Read + Send + Sync + 'static> SingleReader<R> {
+//     pub fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+//         self,
+//         processor: P,
+//         num_threads: usize,
+//     ) -> Result<()> {
+//         let config = self.config();
+//         let reader = Arc::new(Mutex::new(self));
+//         let metrics = Arc::new(ThreadMetrics::default());
+//         let mut handles = Vec::new();
+
+//         for thread_id in 0..num_threads {
+//             let reader = Arc::clone(&reader);
+//             let metrics = Arc::clone(&metrics);
+//             let mut processor = processor.clone();
+
+//             let handle = thread::spawn(move || -> Result<()> {
+//                 let mut record_set = RecordSet::with_capacity(64 * 1024, config);
+
+//                 loop {
+//                     let wait_start = Instant::now();
+//                     let read_start;
+//                     // Fill this thread's record set
+//                     let finished = {
+//                         let mut reader = reader.lock().unwrap();
+//                         let wait_time = wait_start.elapsed().as_micros() as usize;
+//                         metrics.wait_time.fetch_add(wait_time, Ordering::Relaxed);
+
+//                         read_start = Instant::now();
+//                         let result = reader.fill_external_set(&mut record_set)?;
+//                         let read_time = read_start.elapsed().as_micros() as usize;
+//                         metrics.read_time.fetch_add(read_time, Ordering::Relaxed);
+//                         result
+//                     };
+
+//                     let process_start = Instant::now();
+//                     // Process records in this batch
+//                     for i in 0..record_set.n_records() {
+//                         let record = record_set.get_record(i).unwrap();
+//                         processor.process_record(record)?;
+//                     }
+//                     processor.on_batch_complete()?;
+
+//                     let process_time = process_start.elapsed().as_micros() as usize;
+//                     metrics
+//                         .process_time
+//                         .fetch_add(process_time, Ordering::Relaxed);
+//                     metrics.iterations.fetch_add(1, Ordering::Relaxed);
+
+//                     // Print periodic stats for this thread
+//                     if metrics.iterations.load(Ordering::Relaxed) % 100 == 0 {
+//                         eprintln!(
+//                             "Thread {} - Avg times (µs): Wait: {}, Read: {}, Process: {}",
+//                             thread_id,
+//                             metrics.wait_time.load(Ordering::Relaxed)
+//                                 / metrics.iterations.load(Ordering::Relaxed),
+//                             metrics.read_time.load(Ordering::Relaxed)
+//                                 / metrics.iterations.load(Ordering::Relaxed),
+//                             metrics.process_time.load(Ordering::Relaxed)
+//                                 / metrics.iterations.load(Ordering::Relaxed)
+//                         );
+//                     }
+
+//                     if finished && record_set.is_empty() {
+//                         break;
+//                     }
+//                 }
+
+//                 Ok(())
+//             });
+
+//             handles.push(handle);
+//         }
+
+//         for handle in handles {
+//             handle.join().unwrap()?;
+//         }
+
+//         Ok(())
+//     }
+// }

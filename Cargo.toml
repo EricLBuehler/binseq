@@ -1,6 +1,6 @@
 [package]
 name = "binseq"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 
 [dependencies]
@@ -16,6 +16,4 @@ niffler = "2.6.0"
 seq_io = "0.3.2"
 
 [profile.release]
-lto = true
-codegen-units = 1
 debug = true
