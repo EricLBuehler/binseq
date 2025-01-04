@@ -130,15 +130,15 @@ pub fn main() -> Result<()> {
     let binseq_path_paired = "./data/test_paired.bq";
     let r1_size = 150;
     let r2_size = 300;
-    let num_seq = 10_000_000;
+    let num_seq = 1_000_000;
 
-    // time_it(
-    //     || {
-    //         write_single(binseq_path_single, num_seq, r1_size)?;
-    //         Ok(())
-    //     },
-    //     "write_single",
-    // );
+    time_it(
+        || {
+            write_single(binseq_path_single, num_seq, r1_size)?;
+            Ok(())
+        },
+        "write_single",
+    );
 
     time_it(
         || {
@@ -182,13 +182,13 @@ pub fn main() -> Result<()> {
         );
     }
 
-    // time_it(
-    //     || {
-    //         write_paired(binseq_path_paired, num_seq, r1_size, r2_size)?;
-    //         Ok(())
-    //     },
-    //     "write_paired",
-    // );
+    time_it(
+        || {
+            write_paired(binseq_path_paired, num_seq, r1_size, r2_size)?;
+            Ok(())
+        },
+        "write_paired",
+    );
 
     time_it(
         || {
