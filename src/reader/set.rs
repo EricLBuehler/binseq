@@ -151,6 +151,11 @@ impl RecordSet {
 
 /// Memory-mapped record set
 impl RecordSet {
+    /// Fills the record set from a memory mapped file, handling single-end data
+    /// Returns true if EOF was reached, false if the record set was filled
+    ///
+    /// This method is specific to single-end data, reading data directly from the memory mapped file
+    /// into the internal buffers.
     pub fn fill_from_mmap_single(
         &mut self,
         mmap: &Mmap,
