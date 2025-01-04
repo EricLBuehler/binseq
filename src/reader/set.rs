@@ -1,3 +1,7 @@
+use anyhow::Result;
+use byteorder::{ByteOrder, LittleEndian};
+use memmap2::Mmap;
+
 use crate::{RecordConfig, RefRecord, RefRecordPair};
 
 pub const DEFAULT_CAPACITY: usize = 128 * 1024;
@@ -142,5 +146,47 @@ impl RecordSet {
 
     pub fn increment_records(&mut self) {
         self.n_records += 1;
+    }
+}
+
+/// Memory-mapped record set
+impl RecordSet {
+    pub fn fill_from_mmap_single(
+        &mut self,
+        mmap: &Mmap,
+        offset: &mut usize,
+        end_offset: usize,
+    ) -> Result<bool> {
+        self.clear();
+        let record_size = 8 + (self.sconfig.n_chunks * 8); // flag + sequence
+        let config = self.sconfig;
+
+        while !self.is_full() {
+            // Check if we've reached our assigned chunk end
+            if *offset + record_size > end_offset {
+                return Ok(true);
+            }
+
+            // Read flag
+            let flag_bytes = &mmap[*offset..*offset + 8];
+            let flag = LittleEndian::read_u64(flag_bytes);
+            *offset += 8;
+
+            // Read sequence chunks
+            let buffer = self.get_buffer_mut();
+
+            // Safety: We've verified the range is within bounds
+            unsafe {
+                let src_ptr = mmap[*offset..*offset + (config.n_chunks * 8)].as_ptr() as *const u64;
+                let chunk_slice = std::slice::from_raw_parts(src_ptr, config.n_chunks);
+                buffer.extend_from_slice(chunk_slice);
+            }
+            *offset += self.sconfig.n_chunks * 8;
+
+            self.get_flags_mut().push(flag);
+            self.increment_records();
+        }
+
+        Ok(false)
     }
 }

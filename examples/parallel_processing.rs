@@ -12,15 +12,27 @@ use std::{
 
 #[derive(Clone, Default)]
 pub struct MyProcessor {
+    local_counter: usize,
     counter: Arc<AtomicUsize>,
     sbuf: Vec<u8>,
     xbuf: Vec<u8>,
+}
+impl MyProcessor {
+    pub fn counter(&self) -> usize {
+        self.counter.load(Ordering::Relaxed)
+    }
 }
 impl ParallelProcessor for MyProcessor {
     fn process_record(&mut self, record: RefRecord) -> Result<()> {
         self.sbuf.clear();
         record.decode(&mut self.sbuf)?;
-        self.counter.fetch_add(1, Ordering::Relaxed);
+        self.local_counter += 1;
+        Ok(())
+    }
+    fn on_batch_complete(&mut self) -> Result<()> {
+        self.counter
+            .fetch_add(self.local_counter, Ordering::Relaxed);
+        self.local_counter = 0;
         Ok(())
     }
 }
@@ -30,7 +42,13 @@ impl ParallelPairedProcessor for MyProcessor {
         self.xbuf.clear();
         pair.decode_s(&mut self.sbuf)?;
         pair.decode_x(&mut self.xbuf)?;
-        self.counter.fetch_add(1, Ordering::Relaxed);
+        self.local_counter += 1;
+        Ok(())
+    }
+    fn on_batch_complete(&mut self) -> Result<()> {
+        self.counter
+            .fetch_add(self.local_counter, Ordering::Relaxed);
+        self.local_counter = 0;
         Ok(())
     }
 }
@@ -51,6 +69,23 @@ fn sequential_processing(binseq_path: &str) -> Result<()> {
         let record = record?;
         proc.process_record(record)?;
     }
+    Ok(())
+}
+
+fn mmap_processing(binseq_path: &str) -> Result<()> {
+    let mut reader = MmapReader::new(binseq_path)?;
+    let mut proc = MyProcessor::default();
+    while let Some(record) = reader.next() {
+        let record = record?;
+        proc.process_record(record)?;
+    }
+    Ok(())
+}
+
+fn mmap_processing_parallel(binseq_path: &str, n_threads: usize) -> Result<()> {
+    let reader = MmapReader::new(binseq_path)?;
+    let proc = MyProcessor::default();
+    reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
 }
 
@@ -78,15 +113,15 @@ pub fn main() -> Result<()> {
     let binseq_path_paired = "./data/test_paired.bq";
     let r1_size = 150;
     let r2_size = 300;
-    let num_seq = 1_000_000;
+    let num_seq = 10_000_000;
 
-    time_it(
-        || {
-            write_single(binseq_path_single, num_seq, r1_size)?;
-            Ok(())
-        },
-        "write_single",
-    );
+    // time_it(
+    //     || {
+    //         write_single(binseq_path_single, num_seq, r1_size)?;
+    //         Ok(())
+    //     },
+    //     "write_single",
+    // );
 
     time_it(
         || {
@@ -96,7 +131,10 @@ pub fn main() -> Result<()> {
         "single - sequential_processing",
     );
 
-    for n_threads in vec![2, 4, 8, 16] {
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
         time_it(
             || {
                 native_parallel_processing(binseq_path_single, n_threads)?;
@@ -108,29 +146,50 @@ pub fn main() -> Result<()> {
 
     time_it(
         || {
-            write_paired(binseq_path_paired, num_seq, r1_size, r2_size)?;
+            mmap_processing(binseq_path_single)?;
             Ok(())
         },
-        "write_paired",
+        "single - mmap_processing",
     );
 
-    time_it(
-        || {
-            paired_sequential_processing(binseq_path_paired)?;
-            Ok(())
-        },
-        "paired - sequential_processing",
-    );
-
-    for n_threads in vec![2, 4, 8, 16] {
+    for n_threads in 2..=16 {
+        if n_threads % 2 != 0 {
+            continue;
+        }
         time_it(
             || {
-                paired_native_parallel_processing(binseq_path_paired, n_threads)?;
+                mmap_processing_parallel(binseq_path_single, n_threads)?;
                 Ok(())
             },
-            &format!("paired - parallel_processing ({})", n_threads),
+            &format!("single - mmap_parallel_processing ({})", n_threads),
         );
     }
+
+    // time_it(
+    //     || {
+    //         write_paired(binseq_path_paired, num_seq, r1_size, r2_size)?;
+    //         Ok(())
+    //     },
+    //     "write_paired",
+    // );
+
+    // time_it(
+    //     || {
+    //         paired_sequential_processing(binseq_path_paired)?;
+    //         Ok(())
+    //     },
+    //     "paired - sequential_processing",
+    // );
+
+    // for n_threads in vec![2, 4, 8, 16] {
+    //     time_it(
+    //         || {
+    //             paired_native_parallel_processing(binseq_path_paired, n_threads)?;
+    //             Ok(())
+    //         },
+    //         &format!("paired - parallel_processing ({})", n_threads),
+    //     );
+    // }
 
     Ok(())
 }

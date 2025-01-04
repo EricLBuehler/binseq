@@ -6,7 +6,8 @@ use std::{
 };
 
 use binseq::{
-    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, PairedRead, PairedReader, SingleReader,
+    BinseqHeader, BinseqRead, BinseqRecord, BinseqWriter, MmapReader, PairedRead, PairedReader,
+    SingleReader,
 };
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
@@ -44,6 +45,30 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     // Read the binary sequence
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let mut reader = SingleReader::new(bufreader)?;
+    let mut num_records_read = 0;
+    let mut record_buffer = Vec::new();
+    while let Some(record) = reader.next() {
+        let record = record?;
+
+        record.decode(&mut record_buffer)?;
+
+        // Check if the decoded sequence matches the original
+        let buf_str = std::str::from_utf8(&record_buffer)?;
+        let seq_str = std::str::from_utf8(&all_sequences[num_records_read])?;
+        assert_eq!(buf_str, seq_str);
+
+        num_records_read += 1;
+        record_buffer.clear();
+    }
+    eprintln!("Finished reading {} records (mmap)", num_records_read);
+    eprintln!(
+        "Difference in total records: {}",
+        num_records_write - num_records_read
+    );
+    eprintln!("Number of records in vec: {}", all_sequences.len());
+
+    // Read the binary sequence with mmap
+    let mut reader = MmapReader::new(binseq_path)?;
     let mut num_records_read = 0;
     let mut record_buffer = Vec::new();
     while let Some(record) = reader.next() {
