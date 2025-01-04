@@ -13,42 +13,32 @@ use std::{
 #[derive(Clone, Default)]
 pub struct MyProcessor {
     counter: Arc<AtomicUsize>,
-    dbuf: Vec<u8>,
+    sbuf: Vec<u8>,
+    xbuf: Vec<u8>,
 }
 impl ParallelProcessor for MyProcessor {
     fn process_record(&mut self, record: RefRecord) -> Result<()> {
-        self.dbuf.clear();
-        record.decode(&mut self.dbuf)?;
+        self.sbuf.clear();
+        record.decode(&mut self.sbuf)?;
         self.counter.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 }
-
-#[derive(Clone, Default)]
-pub struct MyPairedProcessor {
-    counter: Arc<AtomicUsize>,
-    dbuf_1: Vec<u8>,
-    dbuf_2: Vec<u8>,
-}
-impl ParallelPairedProcessor for MyPairedProcessor {
+impl ParallelPairedProcessor for MyProcessor {
     fn process_record_pair(&mut self, pair: RefRecordPair) -> Result<()> {
-        self.dbuf_1.clear();
-        self.dbuf_2.clear();
-
-        pair.decode_s(&mut self.dbuf_1)?;
-        pair.decode_x(&mut self.dbuf_2)?;
-
+        self.sbuf.clear();
+        self.xbuf.clear();
+        pair.decode_s(&mut self.sbuf)?;
+        pair.decode_x(&mut self.xbuf)?;
         self.counter.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 }
 
-fn native_parallel_processing(binseq_path: &str) -> Result<()> {
+fn native_parallel_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let reader = SingleReader::new(bufreader)?;
     let proc = MyProcessor::default();
-    let n_threads = 2;
-
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
 }
@@ -67,7 +57,7 @@ fn sequential_processing(binseq_path: &str) -> Result<()> {
 fn paired_sequential_processing(binseq_path: &str) -> Result<()> {
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let mut reader = PairedReader::new(bufreader)?;
-    let mut proc = MyPairedProcessor::default();
+    let mut proc = MyProcessor::default();
     while let Some(pair) = reader.next_paired() {
         let pair = pair?;
         proc.process_record_pair(pair)?;
@@ -75,12 +65,10 @@ fn paired_sequential_processing(binseq_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn paired_native_parallel_processing(binseq_path: &str) -> Result<()> {
+fn paired_native_parallel_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
     let bufreader = File::open(binseq_path).map(BufReader::new)?;
     let reader = PairedReader::new(bufreader)?;
-    let proc = MyPairedProcessor::default();
-    let n_threads = 2;
-
+    let proc = MyProcessor::default();
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
 }
@@ -90,7 +78,7 @@ pub fn main() -> Result<()> {
     let binseq_path_paired = "./data/test_paired.bq";
     let r1_size = 150;
     let r2_size = 300;
-    let num_seq = 2_000_000;
+    let num_seq = 1_000_000;
 
     time_it(
         || {
@@ -108,13 +96,15 @@ pub fn main() -> Result<()> {
         "single - sequential_processing",
     );
 
-    time_it(
-        || {
-            native_parallel_processing(binseq_path_single)?;
-            Ok(())
-        },
-        "single - parallel_processing",
-    );
+    for n_threads in vec![2, 4, 8, 16] {
+        time_it(
+            || {
+                native_parallel_processing(binseq_path_single, n_threads)?;
+                Ok(())
+            },
+            &format!("single - parallel_processing ({})", n_threads),
+        );
+    }
 
     time_it(
         || {
@@ -132,13 +122,15 @@ pub fn main() -> Result<()> {
         "paired - sequential_processing",
     );
 
-    time_it(
-        || {
-            paired_native_parallel_processing(binseq_path_paired)?;
-            Ok(())
-        },
-        "paired - parallel_processing",
-    );
+    for n_threads in vec![2, 4, 8, 16] {
+        time_it(
+            || {
+                paired_native_parallel_processing(binseq_path_paired, n_threads)?;
+                Ok(())
+            },
+            &format!("paired - parallel_processing ({})", n_threads),
+        );
+    }
 
     Ok(())
 }
