@@ -37,7 +37,7 @@ pub trait BinseqRecord {
 
         let n_bases = range.len();
         let (_n_chunks, _rem) = self.subsequence(range, sub_buffer)?;
-        bitnuc::decode(&sub_buffer, n_bases, seq_buffer)?;
+        bitnuc::decode(sub_buffer, n_bases, seq_buffer)?;
         Ok(())
     }
 

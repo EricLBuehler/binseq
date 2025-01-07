@@ -75,7 +75,7 @@ impl MmapReader {
         Ok(finished)
     }
 
-    fn next_record<'a>(&'a mut self) -> Option<Result<RefRecord<'a>>> {
+    fn next_record(&mut self) -> Option<Result<RefRecord<'_>>> {
         if self.record_set.is_empty() || self.pos == self.record_set.n_records() {
             match self.fill_record_set() {
                 Ok(true) => {

@@ -28,12 +28,12 @@ impl<'a> RefRecord<'a> {
     }
 }
 
-impl<'a> BinseqRecord for RefRecord<'a> {
+impl BinseqRecord for RefRecord<'_> {
     fn flag(&self) -> u64 {
         self.flag
     }
     fn sequence(&self) -> RefBytes {
-        &self.sequence
+        self.sequence
     }
     fn config(&self) -> RecordConfig {
         self.config

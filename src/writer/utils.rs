@@ -3,7 +3,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::{self, Write};
 
 pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<(), io::Error> {
-    writer.write_u64::<LittleEndian>(flag as u64)
+    writer.write_u64::<LittleEndian>(flag)
 }
 
 /// Write all the elements of the embedded buffer to the writer.

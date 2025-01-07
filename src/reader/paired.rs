@@ -65,7 +65,7 @@ impl<R: Read> PairedReader<R> {
         Ok(self.finished)
     }
 
-    fn next_pair<'a>(&'a mut self) -> Option<Result<RefRecordPair<'a>>> {
+    fn next_pair(&mut self) -> Option<Result<RefRecordPair<'_>>> {
         if self.record_set.is_empty() || self.pos == self.record_set.n_records() {
             match self.fill_record_set() {
                 Ok(true) => {

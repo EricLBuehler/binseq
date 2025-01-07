@@ -14,7 +14,7 @@ pub struct Record {
 }
 
 impl Record {
-    pub fn new<'a>(flag: u64, sequence: Vec<u64>, config: RecordConfig) -> Self {
+    pub fn new(flag: u64, sequence: Vec<u64>, config: RecordConfig) -> Self {
         Self {
             flag,
             sequence,
