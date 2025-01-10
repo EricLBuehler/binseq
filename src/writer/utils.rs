@@ -2,6 +2,7 @@ use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::{self, Write};
 
+/// Write a single flag to the writer.
 pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<(), io::Error> {
     writer.write_u64::<LittleEndian>(flag)
 }

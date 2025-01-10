@@ -6,7 +6,7 @@ mod parallel;
 mod reader;
 mod record;
 mod utils;
-mod writer;
+pub mod writer;
 
 pub use error::{HeaderError, ReadError, WriteError};
 pub use header::BinseqHeader;
