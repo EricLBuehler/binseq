@@ -142,6 +142,7 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
         for thread_id in 0..num_threads {
             let reader = Arc::clone(&reader); // Clone for each thread
             let mut processor = processor.clone(); // Clone for each thread
+            processor.set_tid(thread_id);
 
             let handle = thread::spawn(move || -> Result<()> {
                 let mut record_set = RecordSet::new(config);
@@ -156,9 +157,9 @@ impl<R: Read + Send + Sync + 'static> SingleReader<R> {
                     // Process records in this batch
                     for i in 0..record_set.n_records() {
                         let record = record_set.get_record(i).unwrap();
-                        processor.process_record(record, thread_id)?;
+                        processor.process_record(record)?;
                     }
-                    processor.on_batch_complete(thread_id)?;
+                    processor.on_batch_complete()?;
 
                     // Exit if we hit EOF and processed all records
                     if finished && record_set.is_empty() {

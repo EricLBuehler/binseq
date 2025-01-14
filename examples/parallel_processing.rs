@@ -23,13 +23,13 @@ impl MyProcessor {
     }
 }
 impl ParallelProcessor for MyProcessor {
-    fn process_record(&mut self, record: RefRecord, _tid: usize) -> Result<()> {
+    fn process_record(&mut self, record: RefRecord) -> Result<()> {
         self.sbuf.clear();
         record.decode(&mut self.sbuf)?;
         self.local_counter += 1;
         Ok(())
     }
-    fn on_batch_complete(&mut self, _tid: usize) -> Result<()> {
+    fn on_batch_complete(&mut self) -> Result<()> {
         self.counter
             .fetch_add(self.local_counter, Ordering::Relaxed);
         self.local_counter = 0;
@@ -37,7 +37,7 @@ impl ParallelProcessor for MyProcessor {
     }
 }
 impl ParallelPairedProcessor for MyProcessor {
-    fn process_record_pair(&mut self, pair: RefRecordPair, _tid: usize) -> Result<()> {
+    fn process_record_pair(&mut self, pair: RefRecordPair) -> Result<()> {
         self.sbuf.clear();
         self.xbuf.clear();
         pair.decode_s(&mut self.sbuf)?;
@@ -45,7 +45,7 @@ impl ParallelPairedProcessor for MyProcessor {
         self.local_counter += 1;
         Ok(())
     }
-    fn on_batch_complete(&mut self, _tid: usize) -> Result<()> {
+    fn on_batch_complete(&mut self) -> Result<()> {
         self.counter
             .fetch_add(self.local_counter, Ordering::Relaxed);
         self.local_counter = 0;
@@ -67,7 +67,7 @@ fn sequential_processing(binseq_path: &str) -> Result<()> {
     let mut proc = MyProcessor::default();
     while let Some(record) = reader.next() {
         let record = record?;
-        proc.process_record(record, 0)?;
+        proc.process_record(record)?;
     }
     Ok(())
 }
@@ -77,7 +77,7 @@ fn mmap_processing(binseq_path: &str) -> Result<()> {
     let mut proc = MyProcessor::default();
     while let Some(record) = reader.next() {
         let record = record?;
-        proc.process_record(record, 0)?;
+        proc.process_record(record)?;
     }
     Ok(())
 }
@@ -95,7 +95,7 @@ fn paired_sequential_processing(binseq_path: &str) -> Result<()> {
     let mut proc = MyProcessor::default();
     while let Some(pair) = reader.next_paired() {
         let pair = pair?;
-        proc.process_record_pair(pair, 0)?;
+        proc.process_record_pair(pair)?;
     }
     Ok(())
 }
@@ -113,7 +113,7 @@ fn paired_mmap_processing(binseq_path: &str) -> Result<()> {
     let mut proc = MyProcessor::default();
     while let Some(pair) = reader.next_paired() {
         let pair = pair?;
-        proc.process_record_pair(pair, 0)?;
+        proc.process_record_pair(pair)?;
     }
     Ok(())
 }
