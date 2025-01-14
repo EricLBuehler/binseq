@@ -185,9 +185,9 @@ impl MmapReader {
                         let record = record_set
                             .get_record(i)
                             .expect("Record should exist within range of set");
-                        processor.process_record(record)?;
+                        processor.process_record(record, thread_id)?;
                     }
-                    processor.on_batch_complete()?;
+                    processor.on_batch_complete(thread_id)?;
 
                     // Exit if we've processed our chunk
                     if finished && record_set.is_empty() {
