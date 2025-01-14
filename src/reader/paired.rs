@@ -174,7 +174,7 @@ impl<R: Read + Send + Sync + 'static> PairedReader<R> {
         let mut handles = Vec::new();
 
         // Spawn worker threads
-        for _tid in 0..num_threads {
+        for thread_id in 0..num_threads {
             let reader = Arc::clone(&reader);
             let mut processor = processor.clone();
 
@@ -192,9 +192,9 @@ impl<R: Read + Send + Sync + 'static> PairedReader<R> {
 
                     for i in 0..record_set.n_records() {
                         let pair = record_set.get_record_pair(i).unwrap();
-                        processor.process_record_pair(pair)?;
+                        processor.process_record_pair(pair, thread_id)?;
                     }
-                    processor.on_batch_complete()?;
+                    processor.on_batch_complete(thread_id)?;
 
                     // Exit if we hit EOF and processed all records
                     if finished && record_set.is_empty() {
