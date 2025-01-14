@@ -190,6 +190,7 @@ impl PairedMmapReader {
         for thread_id in 0..num_threads {
             let mmap = Arc::clone(&mmap);
             let mut processor = processor.clone();
+            processor.set_tid(thread_id);
 
             let handle = std::thread::spawn(move || -> Result<()> {
                 // Calculate this thread's range
@@ -213,9 +214,9 @@ impl PairedMmapReader {
                         let record = record_set
                             .get_record_pair(i)
                             .expect("Record should exist within range of set");
-                        processor.process_record_pair(record, thread_id)?;
+                        processor.process_record_pair(record)?;
                     }
-                    processor.on_batch_complete(thread_id)?;
+                    processor.on_batch_complete()?;
 
                     // Exit if we've processed our chunk
                     if finished && record_set.is_empty() {
