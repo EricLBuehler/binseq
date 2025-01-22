@@ -17,7 +17,7 @@ pub use reader::{
 };
 pub use record::{BinseqRecord, Record, RecordConfig, RefBytes, RefRecord, RefRecordPair};
 pub use utils::expected_file_size;
-pub use writer::BinseqWriter;
+pub use writer::{BinseqWriter, Policy};
 
 #[cfg(test)]
 mod testing {
@@ -30,7 +30,7 @@ mod testing {
     #[test]
     fn test_binseq_short() -> Result<()> {
         let header = BinseqHeader::new(16);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
 
         let sequence = b"ACGTACGTACGTACGT";
         writer.write_nucleotides(0, sequence)?;
@@ -49,7 +49,7 @@ mod testing {
     #[test]
     fn test_binseq_short_multiple() -> Result<()> {
         let header = BinseqHeader::new(16);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
 
         let sequence = b"ACGTACGTACGTACGT";
         writer.write_nucleotides(0, sequence)?;
@@ -73,7 +73,7 @@ mod testing {
     #[test]
     fn test_binseq_long() -> Result<()> {
         let header = BinseqHeader::new(40);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
 
         let sequence = b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
         writer.write_nucleotides(0, sequence)?;
@@ -92,7 +92,7 @@ mod testing {
     #[test]
     fn test_binseq_long_multiple() -> Result<()> {
         let header = BinseqHeader::new(40);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
 
         let sequence = b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
         writer.write_nucleotides(0, sequence)?;
@@ -116,7 +116,7 @@ mod testing {
     #[test]
     fn test_n_in_sequence() -> Result<()> {
         let header = BinseqHeader::new(40);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
 
         let sequence = b"ACGTACGTACGTACNTACGTACGTACGTACGTACGTACGT";
         writer.write_nucleotides(0, sequence)?;
@@ -140,7 +140,7 @@ mod testing {
         // write the sequences to a binseq file
         // and store the original sequences
         let header = BinseqHeader::new(seq_len as u32);
-        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header, false)?;
+        let mut writer = BinseqWriter::new(Cursor::new(Vec::new()), header)?;
         for _ in 0..num_records {
             sequence.fill_buffer(&mut rng, seq_len);
             seq_vec.push(sequence.bytes().to_vec());
