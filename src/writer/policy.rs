@@ -16,7 +16,7 @@ pub enum Policy {
     SetToT,
 }
 impl Policy {
-    fn fill_with_known(&self, sequence: &[u8], val: u8, ibuf: &mut Vec<u8>) {
+    fn fill_with_known(sequence: &[u8], val: u8, ibuf: &mut Vec<u8>) {
         for &n in sequence {
             ibuf.push(match n {
                 b'A' | b'C' | b'G' | b'T' => n,
@@ -25,7 +25,7 @@ impl Policy {
         }
     }
 
-    fn fill_with_random<R: Rng>(&self, sequence: &[u8], rng: &mut R, ibuf: &mut Vec<u8>) {
+    fn fill_with_random<R: Rng>(sequence: &[u8], rng: &mut R, ibuf: &mut Vec<u8>) {
         for &n in sequence {
             ibuf.push(match n {
                 b'A' | b'C' | b'G' | b'T' => n,
@@ -62,23 +62,23 @@ impl Policy {
                 bail!(WriteError::InvalidNucleotideSequence)
             }
             Self::RandomDraw => {
-                self.fill_with_random(sequence, rng, ibuf);
+                Self::fill_with_random(sequence, rng, ibuf);
                 Ok(true)
             }
             Self::SetToA => {
-                self.fill_with_known(sequence, b'A', ibuf);
+                Self::fill_with_known(sequence, b'A', ibuf);
                 Ok(true)
             }
             Self::SetToC => {
-                self.fill_with_known(sequence, b'C', ibuf);
+                Self::fill_with_known(sequence, b'C', ibuf);
                 Ok(true)
             }
             Self::SetToG => {
-                self.fill_with_known(sequence, b'G', ibuf);
+                Self::fill_with_known(sequence, b'G', ibuf);
                 Ok(true)
             }
             Self::SetToT => {
-                self.fill_with_known(sequence, b'T', ibuf);
+                Self::fill_with_known(sequence, b'T', ibuf);
                 Ok(true)
             }
         }
