@@ -13,7 +13,7 @@ const FORMAT: u8 = 2;
 /// Size of the header in bytes
 pub const SIZE_HEADER: usize = 32;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BinseqHeader {
     /// Magic number to identify the file format
     ///
