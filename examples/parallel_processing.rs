@@ -249,7 +249,7 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
     // Open the output file
     let header = BinseqHeader::new(seq_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriter::new(out_handle, header, false)?;
+    let mut writer = BinseqWriter::new(out_handle, header)?;
 
     // Write the binary sequence
     let mut sequence = Sequence::new();
@@ -272,7 +272,7 @@ fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usiz
     // Open the output file
     let header = BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriter::new(out_handle, header, true)?;
+    let mut writer = BinseqWriter::new(out_handle, header)?;
 
     // Write the binary sequence
     let mut r1 = Sequence::new();

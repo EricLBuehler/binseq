@@ -1,9 +1,13 @@
 use anyhow::{bail, Result};
+use rand::rngs::ThreadRng;
 use std::io::Write;
 
 use crate::{error::WriteError, BinseqHeader};
 
-use super::utils::{write_buffer, write_flag};
+use super::{
+    utils::{write_buffer, write_flag},
+    Policy,
+};
 
 pub struct BinseqWriter<W: Write> {
     /// Inner writer
@@ -22,21 +26,48 @@ pub struct BinseqWriter<W: Write> {
     /// Used by the extended sequence (read 2)
     xbuffer: Vec<u64>,
 
-    /// Break on invalid nucleotide sequence if encountered (skipped otherwise)
-    break_on_invalid: bool,
+    /// Reusable buffer for invalid nucleotide sequences
+    s_ibuf: Vec<u8>,
+
+    /// Reusable buffer for invalid nucleotide sequences
+    x_ibuf: Vec<u8>,
+
+    /// Invalid Nucleotide Policy
+    policy: Policy,
+
+    /// Random Number Generator
+    rng: ThreadRng,
 
     /// Number of records written
     records_written: usize,
 }
 impl<W: Write> BinseqWriter<W> {
-    pub fn new(mut inner: W, header: BinseqHeader, break_on_invalid: bool) -> Result<Self> {
+    pub fn new(mut inner: W, header: BinseqHeader) -> Result<Self> {
         header.write_bytes(&mut inner)?;
         Ok(Self {
             inner,
             header,
             sbuffer: Vec::new(),
             xbuffer: Vec::new(),
-            break_on_invalid,
+            s_ibuf: Vec::new(),
+            x_ibuf: Vec::new(),
+            policy: Policy::default(),
+            rng: rand::thread_rng(),
+            records_written: 0,
+        })
+    }
+
+    pub fn new_with_policy(mut inner: W, header: BinseqHeader, policy: Policy) -> Result<Self> {
+        header.write_bytes(&mut inner)?;
+        Ok(Self {
+            inner,
+            header,
+            sbuffer: Vec::new(),
+            xbuffer: Vec::new(),
+            s_ibuf: Vec::new(),
+            x_ibuf: Vec::new(),
+            policy,
+            rng: rand::thread_rng(),
             records_written: 0,
         })
     }
@@ -56,8 +87,11 @@ impl<W: Write> BinseqWriter<W> {
 
         // Fill the buffer with the 2-bit representation of the nucleotides
         if bitnuc::encode(sequence, &mut self.sbuffer).is_err() {
-            if self.break_on_invalid {
-                bail!(WriteError::InvalidNucleotideSequence)
+            if self
+                .policy
+                .handle(sequence, &mut self.s_ibuf, &mut self.rng)?
+            {
+                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(false);
             }
@@ -91,8 +125,14 @@ impl<W: Write> BinseqWriter<W> {
         if bitnuc::encode(seq1, &mut self.sbuffer).is_err()
             || bitnuc::encode(seq2, &mut self.xbuffer).is_err()
         {
-            if self.break_on_invalid {
-                bail!(WriteError::InvalidNucleotideSequence)
+            self.sbuffer.clear(); // Clear the buffer to avoid writing invalid data
+            self.xbuffer.clear(); // Clear the buffer to avoid writing invalid data
+
+            if self.policy.handle(seq1, &mut self.s_ibuf, &mut self.rng)?
+                && self.policy.handle(seq2, &mut self.x_ibuf, &mut self.rng)?
+            {
+                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(false);
             }
