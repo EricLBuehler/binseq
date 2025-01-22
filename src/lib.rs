@@ -130,6 +130,138 @@ mod testing {
         Ok(())
     }
 
+    #[test]
+    fn test_n_in_sequence_policy_ignore() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::IgnoreSequence)?;
+        writer.write_nucleotides(0, sequence)?;
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next();
+        assert!(record.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_error() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::BreakOnInvalid)?;
+        let result = writer.write_nucleotides(0, sequence);
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_random() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::RandomDraw)?;
+        writer.write_nucleotides(0, sequence)?;
+
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next().unwrap()?;
+        assert_eq!(record.flag(), 0);
+        let dbuf = record.decode_alloc()?;
+        assert_eq!(dbuf.len(), 10);
+        for c in dbuf.iter() {
+            assert_ne!(*c, b'N');
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_set_to_a() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::SetToA)?;
+        writer.write_nucleotides(0, sequence)?;
+
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next().unwrap()?;
+        assert_eq!(record.flag(), 0);
+        let dbuf = record.decode_alloc()?;
+        assert_eq!(dbuf.len(), 10);
+        for c in dbuf.iter() {
+            assert_eq!(*c, b'A');
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_set_to_c() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::SetToC)?;
+        writer.write_nucleotides(0, sequence)?;
+
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next().unwrap()?;
+        assert_eq!(record.flag(), 0);
+        let dbuf = record.decode_alloc()?;
+        assert_eq!(dbuf.len(), 10);
+        for c in dbuf.iter() {
+            assert_eq!(*c, b'C');
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_set_to_g() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::SetToG)?;
+        writer.write_nucleotides(0, sequence)?;
+
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next().unwrap()?;
+        assert_eq!(record.flag(), 0);
+        let dbuf = record.decode_alloc()?;
+        assert_eq!(dbuf.len(), 10);
+        for c in dbuf.iter() {
+            assert_eq!(*c, b'G');
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_n_in_sequence_policy_set_to_t() -> Result<()> {
+        let header = BinseqHeader::new(10);
+        let sequence = b"NNNNNNNNNN";
+
+        let mut writer =
+            BinseqWriter::new_with_policy(Cursor::new(Vec::new()), header, Policy::SetToT)?;
+        writer.write_nucleotides(0, sequence)?;
+
+        let cursor = writer.into_inner().into_inner();
+        let mut reader = SingleReader::new(cursor.as_slice())?;
+        let record = reader.next().unwrap()?;
+        assert_eq!(record.flag(), 0);
+        let dbuf = record.decode_alloc()?;
+        assert_eq!(dbuf.len(), 10);
+        for c in dbuf.iter() {
+            assert_eq!(*c, b'T');
+        }
+        Ok(())
+    }
+
     fn valid_reconstruction(seq_len: usize, num_records: usize) -> Result<()> {
         let mut rng = rand::thread_rng();
         let mut sequence = Sequence::new();
