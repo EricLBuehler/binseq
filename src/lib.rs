@@ -9,7 +9,7 @@ mod utils;
 pub mod writer;
 
 pub use error::{HeaderError, ReadError, WriteError};
-pub use header::BinseqHeader;
+pub use header::{BinseqHeader, SIZE_HEADER};
 pub use parallel::{ParallelPairedProcessor, ParallelProcessor};
 pub use reader::{
     BinseqRead, MmapReader, PairedEndRead, PairedMmapReader, PairedRead, PairedReader, RecordSet,
