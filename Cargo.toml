@@ -8,6 +8,7 @@ anyhow = "1.0.94"
 bitnuc = "0.2.8"
 byteorder = "1.5.0"
 memmap2 = "0.9.5"
+rand = "0.8.5"
 thiserror = "2.0.8"
 
 [dev-dependencies]
