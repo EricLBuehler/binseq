@@ -113,6 +113,11 @@ impl MmapReader {
         self.n_processed += record_set.n_records();
         Ok(finished)
     }
+
+    /// Returns the number of records in the file
+    pub fn num_records(&self) -> usize {
+        (self.mmap.len() - SIZE_HEADER) / self.record_size()
+    }
 }
 
 impl BinseqRead for MmapReader {
