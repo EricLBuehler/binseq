@@ -32,3 +32,10 @@ jobs:
       - uses: actions/checkout@v3
       - name: run example
         run: cargo run --release --example parallel_processing
+
+  example_reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: run example
+        run: cargo run --release --example reset_readers

@@ -118,6 +118,14 @@ impl MmapReader {
     pub fn num_records(&self) -> usize {
         (self.mmap.len() - SIZE_HEADER) / self.record_size()
     }
+
+    /// Resets the cursor back to the start
+    pub fn reset(&mut self) {
+        self.offset = SIZE_HEADER;
+        self.pos = 0;
+        self.n_processed = 0;
+        self.finished = false;
+    }
 }
 
 impl BinseqRead for MmapReader {
