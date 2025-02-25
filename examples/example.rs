@@ -6,7 +6,7 @@ use anyhow::Result;
 use binseq::{MmapReader, ParallelProcessor, RefRecord};
 use parking_lot::Mutex;
 
-/// A struct for decoding VBINSEQ data back to FASTQ format.
+/// A struct for decoding BINSEQ data back to FASTQ format.
 #[derive(Clone)]
 pub struct Decoder {
     /// Local values
