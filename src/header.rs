@@ -34,9 +34,9 @@ pub struct BinseqHeader {
     /// 4 bytes
     pub xlen: u32,
 
-    // Reserve remaining bytes for future use
-    //
-    // 19 bytes
+    /// Reserve remaining bytes for future use
+    ///
+    /// 19 bytes
     pub reserved: [u8; 19],
 }
 impl BinseqHeader {
