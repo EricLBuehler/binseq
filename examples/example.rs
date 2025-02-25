@@ -137,7 +137,7 @@ fn match_output(path: Option<&str>) -> Result<Box<dyn Write + Send>> {
 fn main() -> Result<()> {
     let file = std::env::args()
         .nth(1)
-        .unwrap_or("./data/test.bq".to_string());
+        .unwrap_or("./data/subset.bq".to_string());
     let n_threads = std::env::args().nth(2).unwrap_or("1".to_string()).parse()?;
 
     let reader = MmapReader::new(&file)?;
