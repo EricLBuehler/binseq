@@ -1,4 +1,14 @@
-use crate::RecordConfig;
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+pub enum Error {
+    HeaderError(#[from] HeaderError),
+    ReadError(#[from] ReadError),
+    WriteError(#[from] WriteError),
+    IoError(#[from] std::io::Error),
+    BitnucError(#[from] bitnuc::NucleotideError),
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum HeaderError {
@@ -10,24 +20,23 @@ pub enum HeaderError {
 
     #[error("Invalid reserved bytes")]
     InvalidReservedBytes,
+
+    #[error("Invalid number of bytes provided: {0}. Expected: {1}")]
+    InvalidSize(usize, usize),
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ReadError {
-    #[error("Unexpected end of stream in flag (record number: {1}): {0}")]
-    UnexpectedEndOfStreamFlag(std::io::Error, usize),
+    #[error("File is not regular")]
+    IncompatibleFile,
 
-    #[error("Unexpected end of stream in sequence (record number: {1}): {0}")]
-    UnexpectedEndOfStreamSequence(std::io::Error, usize),
+    #[error(
+        "Number of bytes in file does not match expectation - possibly truncated at byte pos {0}"
+    )]
+    FileTruncation(usize),
 
-    #[error("Unpaired sequence reader used for paired sequence input. Found xlen: {0}")]
-    UnexpectedPairedBinseq(u32),
-
-    #[error("Missing paired sequence - found slen: {0} but xlen: 0")]
-    MissingPairedSequence(u32),
-
-    #[error("Incompatible record set. Expected: {0:?}, Received: {1:?}")]
-    IncompatibleRecordSet(RecordConfig, RecordConfig),
+    #[error("Requested record index ({0}) is out of record range ({1})")]
+    OutOfRange(usize, usize),
 }
 
 #[derive(thiserror::Error, Debug)]

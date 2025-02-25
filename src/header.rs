@@ -1,8 +1,7 @@
-use anyhow::{bail, Result};
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 
-use crate::error::HeaderError;
+use crate::{error::Result, HeaderError};
 
 /// Current magic number: "BSEQ" in ASCII
 const MAGIC: u32 = 0x42534551;
@@ -64,17 +63,17 @@ impl BinseqHeader {
     pub fn from_bytes(buffer: &[u8; SIZE_HEADER]) -> Result<Self> {
         let magic = LittleEndian::read_u32(&buffer[0..4]);
         if magic != MAGIC {
-            bail!(HeaderError::InvalidMagicNumber(magic));
+            return Err(HeaderError::InvalidMagicNumber(magic).into());
         }
         let format = buffer[4];
         if format != FORMAT {
-            bail!(HeaderError::InvalidFormatVersion(format));
+            return Err(HeaderError::InvalidFormatVersion(format).into());
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
         let reserved = match buffer[13..32].try_into() {
             Ok(reserved) => reserved,
-            Err(_) => bail!(HeaderError::InvalidReservedBytes),
+            Err(_) => return Err(HeaderError::InvalidReservedBytes.into()),
         };
         Ok(Self {
             magic,
@@ -83,6 +82,16 @@ impl BinseqHeader {
             xlen,
             reserved,
         })
+    }
+
+    /// Parses an arbitrarily sized buffer
+    pub fn from_buffer(buffer: &[u8]) -> Result<Self> {
+        let mut bytes = [0u8; SIZE_HEADER];
+        if buffer.len() < SIZE_HEADER {
+            return Err(HeaderError::InvalidSize(buffer.len(), SIZE_HEADER).into());
+        }
+        bytes.copy_from_slice(&buffer[..SIZE_HEADER]);
+        Self::from_bytes(&bytes)
     }
 
     pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<()> {
