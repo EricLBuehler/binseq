@@ -94,6 +94,9 @@ pub struct MmapReader {
     /// Memory mapped file contents
     mmap: Arc<Mmap>,
 
+    /// BINSEQ header
+    header: BinseqHeader,
+
     /// Record configuration
     config: RecordConfig,
 }
@@ -122,6 +125,7 @@ impl MmapReader {
 
         Ok(Self {
             mmap: Arc::new(mmap),
+            header,
             config,
         })
     }
@@ -129,6 +133,11 @@ impl MmapReader {
     /// Returns the number of records
     pub fn num_records(&self) -> usize {
         (self.mmap.len() - SIZE_HEADER) / self.config.record_size_bytes()
+    }
+
+    /// Returns the header
+    pub fn header(&self) -> BinseqHeader {
+        self.header
     }
 
     /// Returns a specific record
