@@ -80,6 +80,22 @@ impl RecordConfig {
         self.xlen > 0
     }
 
+    pub fn slen(&self) -> usize {
+        self.slen
+    }
+
+    pub fn xlen(&self) -> usize {
+        self.xlen
+    }
+
+    pub fn schunk(&self) -> usize {
+        self.schunk
+    }
+
+    pub fn xchunk(&self) -> usize {
+        self.xchunk
+    }
+
     /// Returns the full record size in bytes (u8):
     /// 8 * (schunk + xchunk + 1 (flag))
     pub fn record_size_bytes(&self) -> usize {
