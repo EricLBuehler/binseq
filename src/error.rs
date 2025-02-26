@@ -8,6 +8,7 @@ pub enum Error {
     WriteError(#[from] WriteError),
     IoError(#[from] std::io::Error),
     BitnucError(#[from] bitnuc::NucleotideError),
+    GenericError(#[from] anyhow::Error),
 }
 
 #[derive(thiserror::Error, Debug)]
