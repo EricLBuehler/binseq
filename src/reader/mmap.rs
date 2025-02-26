@@ -46,6 +46,9 @@ impl<'a> RefRecord<'a> {
     pub fn paired(&self) -> bool {
         self.config.paired()
     }
+    pub fn config(&self) -> RecordConfig {
+        self.config
+    }
 }
 
 #[derive(Clone, Copy)]
