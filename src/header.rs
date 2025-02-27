@@ -4,10 +4,10 @@ use std::io::{Read, Write};
 use crate::{error::Result, HeaderError};
 
 /// Current magic number: "BSEQ" in ASCII
-const MAGIC: u32 = 0x42534551;
+const MAGIC: u32 = 0x51455342;
 
 /// Current format version
-const FORMAT: u8 = 2;
+const FORMAT: u8 = 1;
 
 /// Size of the header in bytes
 pub const SIZE_HEADER: usize = 32;
