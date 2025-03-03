@@ -3,6 +3,7 @@
 pub mod error;
 mod header;
 mod parallel;
+mod policy;
 mod reader;
 mod utils;
 pub mod writer;
@@ -10,9 +11,10 @@ pub mod writer;
 pub use error::{Error, HeaderError, ReadError, Result, WriteError};
 pub use header::{BinseqHeader, SIZE_HEADER};
 pub use parallel::ParallelProcessor;
+pub use policy::Policy;
 pub use reader::{MmapReader, RefRecord};
 pub use utils::expected_file_size;
-pub use writer::{BinseqWriter, Policy};
+pub use writer::BinseqWriter;
 
 // #[cfg(test)]
 // mod testing {
