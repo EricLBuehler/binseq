@@ -139,27 +139,63 @@ impl Encoder {
     }
 }
 
+#[derive(Default)]
+pub struct BinseqWriterBuilder {
+    /// Required header for the BINSEQ file.
+    header: Option<BinseqHeader>,
+    /// Optional policy for encoding.
+    policy: Option<Policy>,
+    /// Optional headless mode (used in parallel writing).
+    headless: Option<bool>,
+}
+impl BinseqWriterBuilder {
+    pub fn header(mut self, header: BinseqHeader) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    pub fn headless(mut self, headless: bool) -> Self {
+        self.headless = Some(headless);
+        self
+    }
+
+    pub fn build<W: Write>(self, inner: W) -> Result<BinseqWriter<W>> {
+        let Some(header) = self.header else {
+            return Err(WriteError::MissingHeader.into());
+        };
+        let policy = self.policy.unwrap_or_default();
+        let headless = self.headless.unwrap_or(false);
+        BinseqWriter::new(inner, header, policy, headless)
+    }
+}
+
 pub struct BinseqWriter<W: Write> {
     /// Inner writer
     inner: W,
 
     /// Encoder used by the writer
     encoder: Encoder,
+
+    /// Flag indicating whether the header was written to the inner writer
+    headless: bool,
 }
 impl<W: Write> BinseqWriter<W> {
-    pub fn new(mut inner: W, header: BinseqHeader) -> Result<Self> {
-        header.write_bytes(&mut inner)?;
-        Ok(Self {
-            inner,
-            encoder: Encoder::new(header),
-        })
-    }
-
-    pub fn new_with_policy(mut inner: W, header: BinseqHeader, policy: Policy) -> Result<Self> {
-        header.write_bytes(&mut inner)?;
+    /// Creates a new `BinseqWriter` instance.
+    ///
+    /// For a more convenient way to create a `BinseqWriter`, use the `BinseqWriterBuilder` struct.
+    pub fn new(mut inner: W, header: BinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
+        if !headless {
+            header.write_bytes(&mut inner)?;
+        }
         Ok(Self {
             inner,
             encoder: Encoder::with_policy(header, policy),
+            headless,
         })
     }
 
@@ -194,10 +230,17 @@ impl<W: Write> BinseqWriter<W> {
         }
     }
 
+    /// Consumes the writer, returning the inner writer
     pub fn into_inner(self) -> W {
         self.inner
     }
 
+    /// Provides a mutable reference to the inner writer
+    pub fn by_ref(&mut self) -> &mut W {
+        self.inner.by_ref()
+    }
+
+    /// Flushes the inner writer
     pub fn flush(&mut self) -> Result<()> {
         self.inner.flush()?;
         Ok(())
@@ -210,5 +253,42 @@ impl<W: Write> BinseqWriter<W> {
         let mut encoder = self.encoder.clone();
         encoder.clear();
         encoder
+    }
+
+    /// Checks if the writer is headless (The header was not written to the inner writer)
+    pub fn is_headless(&self) -> bool {
+        self.headless
+    }
+}
+
+#[cfg(test)]
+mod testing {
+
+    use super::*;
+    use crate::SIZE_HEADER;
+
+    #[test]
+    fn test_headless() -> Result<()> {
+        let inner = Vec::new();
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .headless(true)
+            .build(inner)?;
+        assert!(writer.is_headless());
+        let inner = writer.by_ref();
+        assert!(inner.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_not_headless() -> Result<()> {
+        let inner = Vec::new();
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(inner)?;
+        assert!(!writer.is_headless());
+        let inner = writer.by_ref();
+        assert_eq!(inner.len(), SIZE_HEADER);
+        Ok(())
     }
 }
