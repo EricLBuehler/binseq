@@ -168,8 +168,8 @@ impl<W: Write> BinseqWriter<W> {
     /// Returns `Ok(true)` if the sequence was written successfully, `Ok(false)` if the sequence was
     /// skipped due to an invalid nucleotide sequence, and an error if the sequence length does not
     /// match the header.
-    pub fn write_nucleotides(&mut self, flag: u64, sequence: &[u8]) -> Result<bool> {
-        if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
+    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
+        if let Some(sbuffer) = self.encoder.encode_single(primary)? {
             write_flag(&mut self.inner, flag)?;
             write_buffer(&mut self.inner, sbuffer)?;
             Ok(true)
@@ -183,8 +183,8 @@ impl<W: Write> BinseqWriter<W> {
     /// Returns `Ok(true)` if the sequences were written successfully, `Ok(false)` if the sequences were
     /// skipped due to an invalid nucleotide sequence, and an error if the respective sequence lengths
     /// do not match the header.
-    pub fn write_paired(&mut self, flag: u64, seq1: &[u8], seq2: &[u8]) -> Result<bool> {
-        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(seq1, seq2)? {
+    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
+        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
             write_flag(&mut self.inner, flag)?;
             write_buffer(&mut self.inner, sbuffer)?;
             write_buffer(&mut self.inner, xbuffer)?;
