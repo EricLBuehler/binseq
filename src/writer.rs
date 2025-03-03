@@ -202,4 +202,13 @@ impl<W: Write> BinseqWriter<W> {
         self.inner.flush()?;
         Ok(())
     }
+
+    /// Clone the encoder for the file
+    ///
+    /// Makes sure the new encoder is cleared before returning it.
+    pub fn new_encoder(&self) -> Encoder {
+        let mut encoder = self.encoder.clone();
+        encoder.clear();
+        encoder
+    }
 }
