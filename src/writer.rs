@@ -1,13 +1,22 @@
-use anyhow::{bail, Result};
-use rand::rngs::ThreadRng;
+use std::io;
 use std::io::Write;
 
-use crate::{error::WriteError, BinseqHeader};
+use anyhow::{bail, Result};
+use byteorder::{LittleEndian, WriteBytesExt};
+use rand::rngs::ThreadRng;
 
-use super::{
-    utils::{write_buffer, write_flag},
-    Policy,
-};
+use crate::{error::WriteError, BinseqHeader, Policy};
+
+/// Write a single flag to the writer.
+pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<(), io::Error> {
+    writer.write_u64::<LittleEndian>(flag)
+}
+
+/// Write all the elements of the embedded buffer to the writer.
+pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<(), io::Error> {
+    ebuf.iter()
+        .try_for_each(|&x| writer.write_u64::<LittleEndian>(x))
+}
 
 pub struct BinseqWriter<W: Write> {
     /// Inner writer
