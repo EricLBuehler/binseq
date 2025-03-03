@@ -1,21 +1,21 @@
-use std::io;
 use std::io::Write;
 
-use anyhow::{bail, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::rngs::ThreadRng;
 
-use crate::{error::WriteError, BinseqHeader, Policy};
+use crate::{error::WriteError, BinseqHeader, Policy, Result};
 
 /// Write a single flag to the writer.
-pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<(), io::Error> {
-    writer.write_u64::<LittleEndian>(flag)
+pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<()> {
+    writer.write_u64::<LittleEndian>(flag)?;
+    Ok(())
 }
 
 /// Write all the elements of the embedded buffer to the writer.
-pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<(), io::Error> {
+pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<()> {
     ebuf.iter()
-        .try_for_each(|&x| writer.write_u64::<LittleEndian>(x))
+        .try_for_each(|&x| writer.write_u64::<LittleEndian>(x))?;
+    Ok(())
 }
 
 pub struct BinseqWriter<W: Write> {
@@ -88,10 +88,11 @@ impl<W: Write> BinseqWriter<W> {
     /// match the header.
     pub fn write_nucleotides(&mut self, flag: u64, sequence: &[u8]) -> Result<bool> {
         if sequence.len() != self.header.slen as usize {
-            bail!(WriteError::UnexpectedSequenceLength {
+            return Err(WriteError::UnexpectedSequenceLength {
                 expected: self.header.slen,
-                got: sequence.len()
-            })
+                got: sequence.len(),
+            }
+            .into());
         }
 
         // Fill the buffer with the 2-bit representation of the nucleotides
@@ -119,16 +120,18 @@ impl<W: Write> BinseqWriter<W> {
     /// do not match the header.
     pub fn write_paired(&mut self, flag: u64, seq1: &[u8], seq2: &[u8]) -> Result<bool> {
         if seq1.len() != self.header.slen as usize {
-            bail!(WriteError::UnexpectedSequenceLength {
+            return Err(WriteError::UnexpectedSequenceLength {
                 expected: self.header.slen,
-                got: seq1.len()
-            })
+                got: seq1.len(),
+            }
+            .into());
         }
         if seq2.len() != self.header.xlen as usize {
-            bail!(WriteError::UnexpectedSequenceLength {
-                expected: self.header.slen,
-                got: seq2.len()
-            })
+            return Err(WriteError::UnexpectedSequenceLength {
+                expected: self.header.xlen,
+                got: seq2.len(),
+            }
+            .into());
         }
 
         if bitnuc::encode(seq1, &mut self.sbuffer).is_err()

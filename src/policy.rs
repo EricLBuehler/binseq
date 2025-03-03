@@ -1,7 +1,6 @@
-use anyhow::{bail, Result};
 use rand::Rng;
 
-use crate::error::WriteError;
+use crate::{error::WriteError, Result};
 
 /// Policy for handling invalid nucleotide sequences
 #[derive(Debug, Clone, Copy, Default)]
@@ -59,7 +58,8 @@ impl Policy {
         match self {
             Self::IgnoreSequence => Ok(false),
             Self::BreakOnInvalid => {
-                bail!(WriteError::InvalidNucleotideSequence)
+                let seq_str = std::str::from_utf8(sequence)?.to_string();
+                Err(WriteError::InvalidNucleotideSequence(seq_str).into())
             }
             Self::RandomDraw => {
                 Self::fill_with_random(sequence, rng, ibuf);
