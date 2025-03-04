@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::{BinseqHeader, BinseqWriter, MmapReader};
+use binseq::{BinseqHeader, BinseqWriterBuilder, MmapReader};
 use seq_io::fastq::{Reader, Record};
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
@@ -14,7 +14,9 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     // Open the output file
     let header = BinseqHeader::new(seq_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriter::new(out_handle, header)?;
+    let mut writer = BinseqWriterBuilder::default()
+        .header(header)
+        .build(out_handle)?;
 
     let mut all_sequences = Vec::new();
 
@@ -87,7 +89,9 @@ fn read_write_paired(
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
 
     // Create the writer
-    let mut writer = BinseqWriter::new(out_handle, header)?;
+    let mut writer = BinseqWriterBuilder::default()
+        .header(header)
+        .build(out_handle)?;
 
     // Open the FASTQ readers
     let mut reader_r1 = Reader::new(in_handle_r1);

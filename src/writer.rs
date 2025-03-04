@@ -1,9 +1,9 @@
 use std::io::Write;
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use rand::rngs::ThreadRng;
+use rand::{rngs::SmallRng, SeedableRng};
 
-use crate::{error::WriteError, BinseqHeader, Policy, Result};
+use crate::{error::WriteError, BinseqHeader, Policy, Result, RNG_SEED};
 
 /// Write a single flag to the writer.
 pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<()> {
@@ -18,66 +18,188 @@ pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<()> {
     Ok(())
 }
 
-pub struct BinseqWriter<W: Write> {
-    /// Inner writer
-    inner: W,
-
-    /// Header of the file
+/// Encapsulates the logic for encoding sequences into a binary format.
+#[derive(Clone)]
+pub struct Encoder {
+    /// Header describing the sequence configuration
     header: BinseqHeader,
 
-    /// Reusable buffer for all nucleotides (written as 2-bit after conversion)
-    ///
-    /// Used by the primary sequence (read 1)
+    /// Reusable buffers for all nucleotides (written as 2-bit after conversion)
     sbuffer: Vec<u64>,
-
-    /// Reusable buffer for all nucleotides (written as 2-bit after conversion)
-    ///
-    /// Used by the extended sequence (read 2)
     xbuffer: Vec<u64>,
 
-    /// Reusable buffer for invalid nucleotide sequences
+    /// Reusable buffers for invalid nucleotide sequences
     s_ibuf: Vec<u8>,
-
-    /// Reusable buffer for invalid nucleotide sequences
     x_ibuf: Vec<u8>,
 
     /// Invalid Nucleotide Policy
     policy: Policy,
 
     /// Random Number Generator
-    rng: ThreadRng,
-
-    /// Number of records written
-    records_written: usize,
+    rng: SmallRng,
 }
-impl<W: Write> BinseqWriter<W> {
-    pub fn new(mut inner: W, header: BinseqHeader) -> Result<Self> {
-        header.write_bytes(&mut inner)?;
-        Ok(Self {
-            inner,
-            header,
-            sbuffer: Vec::new(),
-            xbuffer: Vec::new(),
-            s_ibuf: Vec::new(),
-            x_ibuf: Vec::new(),
-            policy: Policy::default(),
-            rng: rand::thread_rng(),
-            records_written: 0,
-        })
+impl Encoder {
+    pub fn new(header: BinseqHeader) -> Self {
+        Self::with_policy(header, Policy::default())
     }
 
-    pub fn new_with_policy(mut inner: W, header: BinseqHeader, policy: Policy) -> Result<Self> {
-        header.write_bytes(&mut inner)?;
-        Ok(Self {
+    /// Initialize a new encoder with the given policy.
+    pub fn with_policy(header: BinseqHeader, policy: Policy) -> Self {
+        Self {
+            header,
+            policy,
+            sbuffer: Vec::default(),
+            xbuffer: Vec::default(),
+            s_ibuf: Vec::default(),
+            x_ibuf: Vec::default(),
+            rng: SmallRng::seed_from_u64(RNG_SEED),
+        }
+    }
+
+    /// Encodes a single sequence as 2-bit.
+    ///
+    /// Will return `None` if the sequence is invalid and the policy does not allow correction.
+    pub fn encode_single(&mut self, primary: &[u8]) -> Result<Option<&[u64]>> {
+        if primary.len() != self.header.slen as usize {
+            return Err(WriteError::UnexpectedSequenceLength {
+                expected: self.header.slen,
+                got: primary.len(),
+            }
+            .into());
+        }
+
+        // Fill the buffer with the 2-bit representation of the nucleotides
+        self.clear();
+        if bitnuc::encode(primary, &mut self.sbuffer).is_err() {
+            self.clear();
+            if self
+                .policy
+                .handle(primary, &mut self.s_ibuf, &mut self.rng)?
+            {
+                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+            } else {
+                return Ok(None);
+            }
+        }
+
+        Ok(Some(&self.sbuffer))
+    }
+
+    /// Encodes a pair of sequences as 2-bit.
+    ///
+    /// Will return `None` if either sequence is invalid and the policy does not allow correction.
+    pub fn encode_paired(
+        &mut self,
+        primary: &[u8],
+        extended: &[u8],
+    ) -> Result<Option<(&[u64], &[u64])>> {
+        if primary.len() != self.header.slen as usize {
+            return Err(WriteError::UnexpectedSequenceLength {
+                expected: self.header.slen,
+                got: primary.len(),
+            }
+            .into());
+        }
+        if extended.len() != self.header.xlen as usize {
+            return Err(WriteError::UnexpectedSequenceLength {
+                expected: self.header.xlen,
+                got: extended.len(),
+            }
+            .into());
+        }
+
+        self.clear();
+        if bitnuc::encode(primary, &mut self.sbuffer).is_err()
+            || bitnuc::encode(extended, &mut self.xbuffer).is_err()
+        {
+            self.clear();
+            if self
+                .policy
+                .handle(primary, &mut self.s_ibuf, &mut self.rng)?
+                && self
+                    .policy
+                    .handle(extended, &mut self.x_ibuf, &mut self.rng)?
+            {
+                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
+            } else {
+                return Ok(None);
+            }
+        }
+
+        Ok(Some((&self.sbuffer, &self.xbuffer)))
+    }
+
+    /// Clear all buffers and reset the encoder.
+    pub fn clear(&mut self) {
+        self.sbuffer.clear();
+        self.xbuffer.clear();
+        self.s_ibuf.clear();
+        self.x_ibuf.clear();
+    }
+}
+
+#[derive(Default)]
+pub struct BinseqWriterBuilder {
+    /// Required header for the BINSEQ file.
+    header: Option<BinseqHeader>,
+    /// Optional policy for encoding.
+    policy: Option<Policy>,
+    /// Optional headless mode (used in parallel writing).
+    headless: Option<bool>,
+}
+impl BinseqWriterBuilder {
+    pub fn header(mut self, header: BinseqHeader) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    pub fn headless(mut self, headless: bool) -> Self {
+        self.headless = Some(headless);
+        self
+    }
+
+    pub fn build<W: Write>(self, inner: W) -> Result<BinseqWriter<W>> {
+        let Some(header) = self.header else {
+            return Err(WriteError::MissingHeader.into());
+        };
+        BinseqWriter::new(
             inner,
             header,
-            sbuffer: Vec::new(),
-            xbuffer: Vec::new(),
-            s_ibuf: Vec::new(),
-            x_ibuf: Vec::new(),
-            policy,
-            rng: rand::thread_rng(),
-            records_written: 0,
+            self.policy.unwrap_or_default(),
+            self.headless.unwrap_or(false),
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct BinseqWriter<W: Write> {
+    /// Inner writer
+    inner: W,
+
+    /// Encoder used by the writer
+    encoder: Encoder,
+
+    /// Flag indicating whether the header was written to the inner writer
+    headless: bool,
+}
+impl<W: Write> BinseqWriter<W> {
+    /// Creates a new `BinseqWriter` instance.
+    ///
+    /// For a more convenient way to create a `BinseqWriter`, use the `BinseqWriterBuilder` struct.
+    pub fn new(mut inner: W, header: BinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
+        if !headless {
+            header.write_bytes(&mut inner)?;
+        }
+        Ok(Self {
+            inner,
+            encoder: Encoder::with_policy(header, policy),
+            headless,
         })
     }
 
@@ -86,31 +208,14 @@ impl<W: Write> BinseqWriter<W> {
     /// Returns `Ok(true)` if the sequence was written successfully, `Ok(false)` if the sequence was
     /// skipped due to an invalid nucleotide sequence, and an error if the sequence length does not
     /// match the header.
-    pub fn write_nucleotides(&mut self, flag: u64, sequence: &[u8]) -> Result<bool> {
-        if sequence.len() != self.header.slen as usize {
-            return Err(WriteError::UnexpectedSequenceLength {
-                expected: self.header.slen,
-                got: sequence.len(),
-            }
-            .into());
+    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
+        if let Some(sbuffer) = self.encoder.encode_single(primary)? {
+            write_flag(&mut self.inner, flag)?;
+            write_buffer(&mut self.inner, sbuffer)?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-
-        // Fill the buffer with the 2-bit representation of the nucleotides
-        if bitnuc::encode(sequence, &mut self.sbuffer).is_err() {
-            if self
-                .policy
-                .handle(sequence, &mut self.s_ibuf, &mut self.rng)?
-            {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-            } else {
-                return Ok(false);
-            }
-        }
-
-        write_flag(&mut self.inner, flag)?;
-        write_buffer(&mut self.inner, &self.sbuffer)?;
-        self.records_written += 1;
-        Ok(true)
     }
 
     /// Write a pair of nucleotide sequences to the file
@@ -118,51 +223,114 @@ impl<W: Write> BinseqWriter<W> {
     /// Returns `Ok(true)` if the sequences were written successfully, `Ok(false)` if the sequences were
     /// skipped due to an invalid nucleotide sequence, and an error if the respective sequence lengths
     /// do not match the header.
-    pub fn write_paired(&mut self, flag: u64, seq1: &[u8], seq2: &[u8]) -> Result<bool> {
-        if seq1.len() != self.header.slen as usize {
-            return Err(WriteError::UnexpectedSequenceLength {
-                expected: self.header.slen,
-                got: seq1.len(),
-            }
-            .into());
+    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
+        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
+            write_flag(&mut self.inner, flag)?;
+            write_buffer(&mut self.inner, sbuffer)?;
+            write_buffer(&mut self.inner, xbuffer)?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        if seq2.len() != self.header.xlen as usize {
-            return Err(WriteError::UnexpectedSequenceLength {
-                expected: self.header.xlen,
-                got: seq2.len(),
-            }
-            .into());
-        }
-
-        if bitnuc::encode(seq1, &mut self.sbuffer).is_err()
-            || bitnuc::encode(seq2, &mut self.xbuffer).is_err()
-        {
-            self.sbuffer.clear(); // Clear the buffer to avoid writing invalid data
-            self.xbuffer.clear(); // Clear the buffer to avoid writing invalid data
-
-            if self.policy.handle(seq1, &mut self.s_ibuf, &mut self.rng)?
-                && self.policy.handle(seq2, &mut self.x_ibuf, &mut self.rng)?
-            {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
-            } else {
-                return Ok(false);
-            }
-        }
-
-        write_flag(&mut self.inner, flag)?;
-        write_buffer(&mut self.inner, &self.sbuffer)?;
-        write_buffer(&mut self.inner, &self.xbuffer)?;
-        self.records_written += 1;
-        Ok(true)
     }
 
+    /// Consumes the writer, returning the inner writer
     pub fn into_inner(self) -> W {
         self.inner
     }
 
+    /// Provides a mutable reference to the inner writer
+    pub fn by_ref(&mut self) -> &mut W {
+        self.inner.by_ref()
+    }
+
+    /// Flushes the inner writer
     pub fn flush(&mut self) -> Result<()> {
         self.inner.flush()?;
+        Ok(())
+    }
+
+    /// Clone the encoder for the file
+    ///
+    /// Makes sure the new encoder is cleared before returning it.
+    pub fn new_encoder(&self) -> Encoder {
+        let mut encoder = self.encoder.clone();
+        encoder.clear();
+        encoder
+    }
+
+    /// Checks if the writer is headless (The header was not written to the inner writer)
+    pub fn is_headless(&self) -> bool {
+        self.headless
+    }
+
+    /// Ingests the internal bytes of a BinseqWriter whose inner writer is a Vec of bytes.
+    ///
+    /// Removes the bytes from the other writer after ingestion.
+    pub fn ingest(&mut self, other: &mut BinseqWriter<Vec<u8>>) -> Result<()> {
+        let other_inner = other.by_ref();
+        self.inner.write_all(other_inner.by_ref())?;
+        other_inner.clear();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod testing {
+
+    use std::{fs::File, io::BufWriter};
+
+    use super::*;
+    use crate::SIZE_HEADER;
+
+    #[test]
+    fn test_headless() -> Result<()> {
+        let inner = Vec::new();
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .headless(true)
+            .build(inner)?;
+        assert!(writer.is_headless());
+        let inner = writer.by_ref();
+        assert!(inner.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_not_headless() -> Result<()> {
+        let inner = Vec::new();
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(inner)?;
+        assert!(!writer.is_headless());
+        let inner = writer.by_ref();
+        assert_eq!(inner.len(), SIZE_HEADER);
+        Ok(())
+    }
+
+    #[test]
+    fn test_stdout() -> Result<()> {
+        let writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(std::io::stdout())?;
+        assert!(!writer.is_headless());
+        Ok(())
+    }
+
+    #[test]
+    fn test_to_path() -> Result<()> {
+        let path = "test_to_path.file";
+        let inner = File::create(path).map(BufWriter::new)?;
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(inner)?;
+        assert!(!writer.is_headless());
+        let inner = writer.by_ref();
+        inner.flush()?;
+
+        // delete file
+        std::fs::remove_file(path)?;
+
         Ok(())
     }
 }

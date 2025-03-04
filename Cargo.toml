@@ -1,6 +1,6 @@
 [package]
 name = "binseq"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ bitnuc = "0.2.8"
 bytemuck = "1.21.0"
 byteorder = "1.5.0"
 memmap2 = "0.9.5"
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 thiserror = "2.0.8"
 
 [dev-dependencies]

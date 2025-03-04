@@ -42,4 +42,6 @@ pub enum WriteError {
     UnexpectedSequenceLength { expected: u32, got: usize },
     #[error("Invalid nucleotides found in sequence: {0}")]
     InvalidNucleotideSequence(String),
+    #[error("Missing header in writer builder")]
+    MissingHeader,
 }

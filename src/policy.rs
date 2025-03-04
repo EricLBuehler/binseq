@@ -2,6 +2,9 @@ use rand::Rng;
 
 use crate::{error::WriteError, Result};
 
+/// A global seed for the random number generator
+pub const RNG_SEED: u64 = 42;
+
 /// Policy for handling invalid nucleotide sequences
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Policy {

@@ -11,10 +11,10 @@ pub mod writer;
 pub use error::{Error, HeaderError, ReadError, Result, WriteError};
 pub use header::{BinseqHeader, SIZE_HEADER};
 pub use parallel::ParallelProcessor;
-pub use policy::Policy;
+pub use policy::{Policy, RNG_SEED};
 pub use reader::{MmapReader, RefRecord};
 pub use utils::expected_file_size;
-pub use writer::BinseqWriter;
+pub use writer::{BinseqWriter, BinseqWriterBuilder};
 
 // #[cfg(test)]
 // mod testing {
