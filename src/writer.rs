@@ -168,9 +168,12 @@ impl BinseqWriterBuilder {
         let Some(header) = self.header else {
             return Err(WriteError::MissingHeader.into());
         };
-        let policy = self.policy.unwrap_or_default();
-        let headless = self.headless.unwrap_or(false);
-        BinseqWriter::new(inner, header, policy, headless)
+        BinseqWriter::new(
+            inner,
+            header,
+            self.policy.unwrap_or_default(),
+            self.headless.unwrap_or(false),
+        )
     }
 }
 
