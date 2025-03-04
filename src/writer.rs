@@ -174,6 +174,7 @@ impl BinseqWriterBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct BinseqWriter<W: Write> {
     /// Inner writer
     inner: W,
@@ -259,10 +260,22 @@ impl<W: Write> BinseqWriter<W> {
     pub fn is_headless(&self) -> bool {
         self.headless
     }
+
+    /// Ingests the internal bytes of a BinseqWriter whose inner writer is a Vec of bytes.
+    ///
+    /// Removes the bytes from the other writer after ingestion.
+    pub fn ingest(&mut self, other: &mut BinseqWriter<Vec<u8>>) -> Result<()> {
+        let other_inner = other.by_ref();
+        self.inner.write_all(other_inner.by_ref())?;
+        other_inner.clear();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod testing {
+
+    use std::{fs::File, io::BufWriter};
 
     use super::*;
     use crate::SIZE_HEADER;
@@ -289,6 +302,32 @@ mod testing {
         assert!(!writer.is_headless());
         let inner = writer.by_ref();
         assert_eq!(inner.len(), SIZE_HEADER);
+        Ok(())
+    }
+
+    #[test]
+    fn test_stdout() -> Result<()> {
+        let writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(std::io::stdout())?;
+        assert!(!writer.is_headless());
+        Ok(())
+    }
+
+    #[test]
+    fn test_to_path() -> Result<()> {
+        let path = "test_to_path.file";
+        let inner = File::create(path).map(BufWriter::new)?;
+        let mut writer = BinseqWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .build(inner)?;
+        assert!(!writer.is_headless());
+        let inner = writer.by_ref();
+        inner.flush()?;
+
+        // delete file
+        std::fs::remove_file(path)?;
+
         Ok(())
     }
 }
