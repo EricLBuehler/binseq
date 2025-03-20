@@ -26,14 +26,14 @@ pub enum Error {
 #[derive(thiserror::Error, Debug)]
 pub enum HeaderError {
     /// The magic number in the header does not match the expected value
-    /// 
+    ///
     /// # Arguments
     /// * `u32` - The invalid magic number that was found
     #[error("Invalid magic number: {0}")]
     InvalidMagicNumber(u32),
 
     /// The format version in the header is not supported
-    /// 
+    ///
     /// # Arguments
     /// * `u8` - The unsupported version number that was found
     #[error("Invalid format version: {0}")]
@@ -44,7 +44,7 @@ pub enum HeaderError {
     InvalidReservedBytes,
 
     /// The size of the data does not match what was specified in the header
-    /// 
+    ///
     /// # Arguments
     /// * First `usize` - The actual number of bytes provided
     /// * Second `usize` - The expected number of bytes according to the header
@@ -60,7 +60,7 @@ pub enum ReadError {
     IncompatibleFile,
 
     /// The file appears to be truncated or corrupted
-    /// 
+    ///
     /// # Arguments
     /// * `usize` - The byte position where the truncation was detected
     #[error(
@@ -69,7 +69,7 @@ pub enum ReadError {
     FileTruncation(usize),
 
     /// Attempted to access a record index that is beyond the available range
-    /// 
+    ///
     /// # Arguments
     /// * First `usize` - The requested record index
     /// * Second `usize` - The maximum available record index
@@ -81,7 +81,7 @@ pub enum ReadError {
 #[derive(thiserror::Error, Debug)]
 pub enum WriteError {
     /// The length of the sequence being written does not match what was specified in the header
-    /// 
+    ///
     /// # Fields
     /// * `expected` - The sequence length specified in the header
     /// * `got` - The actual length of the sequence being written
@@ -89,7 +89,7 @@ pub enum WriteError {
     UnexpectedSequenceLength { expected: u32, got: usize },
 
     /// The sequence contains invalid nucleotide characters
-    /// 
+    ///
     /// # Arguments
     /// * `String` - Description of the invalid nucleotides found
     #[error("Invalid nucleotides found in sequence: {0}")]

@@ -9,17 +9,17 @@ use rand::Rng;
 use crate::{error::WriteError, Result};
 
 /// A global seed for the random number generator used in randomized policies
-/// 
+///
 /// This seed ensures reproducible behavior when using the `RandomDraw` policy
 /// across different runs of the program.
 pub const RNG_SEED: u64 = 42;
 
 /// Policy for handling invalid nucleotide sequences during encoding
-/// 
+///
 /// When encoding sequences into binary format, non-standard nucleotides (anything
 /// other than A, C, G, or T) may be encountered. This enum defines different
 /// strategies for handling such invalid nucleotides.
-/// 
+///
 /// The default policy is `IgnoreSequence`, which skips sequences containing
 /// invalid nucleotides.
 #[derive(Debug, Clone, Copy, Default)]
@@ -27,33 +27,33 @@ pub enum Policy {
     /// Skip sequences containing invalid nucleotides (default policy)
     #[default]
     IgnoreSequence,
-    
+
     /// Fail with an error when invalid nucleotides are encountered
     BreakOnInvalid,
-    
+
     /// Replace invalid nucleotides with randomly chosen valid nucleotides (A, C, G, or T)
     RandomDraw,
-    
+
     /// Replace all invalid nucleotides with 'A'
     SetToA,
-    
+
     /// Replace all invalid nucleotides with 'C'
     SetToC,
-    
+
     /// Replace all invalid nucleotides with 'G'
     SetToG,
-    
+
     /// Replace all invalid nucleotides with 'T'
     SetToT,
 }
 impl Policy {
     /// Helper method to replace invalid nucleotides with a specific nucleotide
-    /// 
+    ///
     /// This internal method processes a sequence and replaces any non-standard
     /// nucleotides (anything other than A, C, G, or T) with the specified value.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `sequence` - The input sequence to process
     /// * `val` - The replacement nucleotide (should be one of A, C, G, or T)
     /// * `ibuf` - The output buffer to store the processed sequence
@@ -67,18 +67,18 @@ impl Policy {
     }
 
     /// Helper method to replace invalid nucleotides with random valid nucleotides
-    /// 
+    ///
     /// This internal method processes a sequence and replaces any non-standard
     /// nucleotides with randomly chosen valid nucleotides (A, C, G, or T).
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `sequence` - The input sequence to process
     /// * `rng` - The random number generator to use for selecting replacement nucleotides
     /// * `ibuf` - The output buffer to store the processed sequence
-    /// 
+    ///
     /// # Type Parameters
-    /// 
+    ///
     /// * `R` - A type that implements the `Rng` trait from the `rand` crate
     fn fill_with_random<R: Rng>(sequence: &[u8], rng: &mut R, ibuf: &mut Vec<u8>) {
         for &n in sequence {
@@ -127,9 +127,9 @@ impl Policy {
     /// let sequence = b"ACGTNX";
     /// let mut output = Vec::new();
     /// let mut rng = thread_rng();
-    /// 
+    ///
     /// let should_process = policy.handle(sequence, &mut output, &mut rng)?;
-    /// 
+    ///
     /// assert!(should_process);
     /// assert_eq!(output, b"ACGTAA");
     /// # Ok(())

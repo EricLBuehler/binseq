@@ -15,14 +15,14 @@ use rand::{rngs::SmallRng, SeedableRng};
 use crate::{error::WriteError, BinseqHeader, Policy, Result, RNG_SEED};
 
 /// Writes a single flag value to a writer in little-endian format
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `writer` - Any type that implements the `Write` trait
 /// * `flag` - The 64-bit flag value to write
-/// 
+///
 /// # Returns
-/// 
+///
 /// * `Ok(())` - If the flag was successfully written
 /// * `Err(Error)` - If writing to the writer failed
 pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<()> {
@@ -31,17 +31,17 @@ pub fn write_flag<W: Write>(writer: &mut W, flag: u64) -> Result<()> {
 }
 
 /// Writes a buffer of u64 values to a writer in little-endian format
-/// 
+///
 /// This function is used to write encoded sequence data to the output.
 /// Each u64 in the buffer contains up to 32 nucleotides in 2-bit format.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `writer` - Any type that implements the `Write` trait
 /// * `ebuf` - The buffer of u64 values to write
-/// 
+///
 /// # Returns
-/// 
+///
 /// * `Ok(())` - If the buffer was successfully written
 /// * `Err(Error)` - If writing to the writer failed
 pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<()> {
@@ -51,11 +51,11 @@ pub fn write_buffer<W: Write>(writer: &mut W, ebuf: &[u64]) -> Result<()> {
 }
 
 /// Encodes nucleotide sequences into a compact 2-bit binary format
-/// 
+///
 /// The `Encoder` handles the conversion of nucleotide sequences (A, C, G, T)
 /// into a compact binary representation where each nucleotide is stored using
 /// 2 bits. It also handles invalid nucleotides according to a configurable policy.
-/// 
+///
 /// The encoder maintains internal buffers to avoid repeated allocations during
 /// encoding operations. These buffers are reused across multiple encode calls
 /// and are cleared automatically when needed.
@@ -66,13 +66,13 @@ pub struct Encoder {
 
     /// Buffers for storing encoded nucleotides in 2-bit format
     /// Each u64 can store 32 nucleotides (64 bits / 2 bits per nucleotide)
-    sbuffer: Vec<u64>,  // Primary sequence buffer
-    xbuffer: Vec<u64>,  // Extended sequence buffer
+    sbuffer: Vec<u64>, // Primary sequence buffer
+    xbuffer: Vec<u64>, // Extended sequence buffer
 
     /// Temporary buffers for handling invalid nucleotides
     /// These store the processed sequences after policy application
-    s_ibuf: Vec<u8>,    // Primary sequence invalid buffer
-    x_ibuf: Vec<u8>,    // Extended sequence invalid buffer
+    s_ibuf: Vec<u8>, // Primary sequence invalid buffer
+    x_ibuf: Vec<u8>, // Extended sequence invalid buffer
 
     /// Policy for handling invalid nucleotides during encoding
     policy: Policy,
@@ -83,13 +83,13 @@ pub struct Encoder {
 }
 impl Encoder {
     /// Creates a new encoder with default invalid nucleotide policy
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `header` - The header defining sequence lengths and format
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// # use binseq::{BinseqHeader, Encoder};
     /// let header = BinseqHeader::new(100); // For sequences of length 100
@@ -100,14 +100,14 @@ impl Encoder {
     }
 
     /// Creates a new encoder with a specific invalid nucleotide policy
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `header` - The header defining sequence lengths and format
     /// * `policy` - The policy for handling invalid nucleotides
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// # use binseq::{BinseqHeader, Encoder, Policy};
     /// let header = BinseqHeader::new(100);
@@ -209,13 +209,13 @@ impl Encoder {
 }
 
 /// Builder for creating configured `BinseqWriter` instances
-/// 
+///
 /// This builder provides a flexible way to create writers with various
 /// configurations. It follows the builder pattern, allowing for optional
 /// settings to be specified in any order.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// # use binseq::{BinseqHeader, BinseqWriterBuilder, Policy, Result};
 /// # fn main() -> Result<()> {
@@ -267,17 +267,17 @@ impl BinseqWriterBuilder {
 }
 
 /// High-level writer for binary sequence files
-/// 
+///
 /// This writer provides a convenient interface for writing nucleotide sequences
 /// to binary files in a compact format. It handles sequence encoding, invalid
 /// nucleotide processing, and file format compliance.
-/// 
+///
 /// The writer can operate in two modes:
 /// - Normal mode: Writes the header followed by records
 /// - Headless mode: Writes only records (useful for parallel writing)
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `W` - The underlying writer type that implements `Write`
 #[derive(Clone)]
 pub struct BinseqWriter<W: Write> {
@@ -293,24 +293,24 @@ pub struct BinseqWriter<W: Write> {
 }
 impl<W: Write> BinseqWriter<W> {
     /// Creates a new `BinseqWriter` instance with specified configuration
-    /// 
+    ///
     /// This is a low-level constructor. For a more convenient way to create a
     /// `BinseqWriter`, use the `BinseqWriterBuilder` struct.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `inner` - The underlying writer to write to
     /// * `header` - The header defining sequence lengths and format
     /// * `policy` - The policy for handling invalid nucleotides
     /// * `headless` - Whether to skip writing the header (for parallel writing)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(BinseqWriter)` - A new writer instance
     /// * `Err(Error)` - If writing the header fails
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// # use binseq::{BinseqHeader, BinseqWriter, Policy, Result};
     /// # fn main() -> Result<()> {
@@ -336,23 +336,23 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Writes a single nucleotide sequence to the output
-    /// 
+    ///
     /// This method encodes and writes a primary sequence along with an associated flag.
     /// The sequence must match the length specified in the header.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `flag` - A 64-bit flag value associated with the sequence
     /// * `primary` - The nucleotide sequence to write
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(true)` - If the sequence was successfully written
     /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
     /// * `Err(Error)` - If an error occurred during writing
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if:
     /// * The sequence length doesn't match the header
     /// * Writing to the underlying writer fails
@@ -367,25 +367,25 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Writes a pair of nucleotide sequences to the output
-    /// 
+    ///
     /// This method encodes and writes both a primary sequence and an extended sequence
     /// (e.g., quality scores) along with an associated flag. Both sequences must
     /// match their respective lengths specified in the header.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `flag` - A 64-bit flag value associated with the sequences
     /// * `primary` - The primary nucleotide sequence
     /// * `extended` - The extended sequence (e.g., quality scores)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(true)` - If both sequences were successfully written
     /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
     /// * `Err(Error)` - If an error occurred during writing
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if:
     /// * Either sequence length doesn't match the header
     /// * Writing to the underlying writer fails
@@ -401,12 +401,12 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Consumes the writer and returns the underlying writer
-    /// 
+    ///
     /// This is useful when you need to access the underlying writer after
     /// writing is complete, for example to get the contents of a `Vec<u8>`.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// # use binseq::{BinseqHeader, BinseqWriterBuilder, Result};
     /// # fn main() -> Result<()> {
@@ -414,7 +414,7 @@ impl<W: Write> BinseqWriter<W> {
     /// let writer = BinseqWriterBuilder::default()
     ///     .header(header)
     ///     .build(Vec::new())?;
-    /// 
+    ///
     /// // After writing sequences...
     /// let bytes = writer.into_inner();
     /// # Ok(())
@@ -425,7 +425,7 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Gets a mutable reference to the underlying writer
-    /// 
+    ///
     /// This allows direct access to the underlying writer while retaining
     /// ownership of the `BinseqWriter`.
     pub fn by_ref(&mut self) -> &mut W {
@@ -433,9 +433,9 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Flushes any buffered data to the underlying writer
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(())` - If the flush was successful
     /// * `Err(Error)` - If flushing failed
     pub fn flush(&mut self) -> Result<()> {
@@ -444,13 +444,13 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Creates a new encoder with the same configuration as this writer
-    /// 
+    ///
     /// This is useful when you need a separate encoder instance for parallel
     /// processing or other scenarios where you need independent encoding.
     /// The new encoder is initialized with a cleared state.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A new `Encoder` instance with the same configuration but cleared buffers
     pub fn new_encoder(&self) -> Encoder {
         let mut encoder = self.encoder.clone();
@@ -459,30 +459,30 @@ impl<W: Write> BinseqWriter<W> {
     }
 
     /// Checks if this writer is in headless mode
-    /// 
+    ///
     /// In headless mode, the writer does not write the header to the output.
     /// This is useful for parallel writing scenarios where only one writer
     /// should write the header.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// `true` if the writer is in headless mode, `false` otherwise
     pub fn is_headless(&self) -> bool {
         self.headless
     }
 
     /// Ingests the contents of another writer's buffer
-    /// 
+    ///
     /// This method is used in parallel writing scenarios to combine the output
     /// of multiple writers. It takes the contents of another writer's buffer
     /// and writes them to this writer's output.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `other` - Another writer whose underlying writer is a `Vec<u8>`
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(())` - If the contents were successfully ingested
     /// * `Err(Error)` - If writing the contents failed
     pub fn ingest(&mut self, other: &mut BinseqWriter<Vec<u8>>) -> Result<()> {
