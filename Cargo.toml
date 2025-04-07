@@ -2,6 +2,8 @@
 name = "binseq"
 version = "0.5.4"
 edition = "2021"
+license = "MIT"
+authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org>"]
 
 [dependencies]
 anyhow = "1.0.94"
