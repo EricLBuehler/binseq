@@ -2,8 +2,13 @@
 name = "binseq"
 version = "0.5.4"
 edition = "2021"
+description = "A high efficiency binary format for sequencing data"
 license = "MIT"
 authors = ["Noam Teyssier <noam.teyssier@arcinstitute.org>"]
+repository = "https://github.com/arcinstitute/binseq"
+documentation = "https://docs.rs/binseq"
+categories = ["science::bioinformatics", "encoding", "data-structures"]
+keywords = ["bioinformatics", "nucleotide", "sequencing", "genomics", "fastq"]
 
 [dependencies]
 anyhow = "1.0.94"
@@ -21,6 +26,3 @@ niffler = "2.6.0"
 seq_io = "0.3.2"
 parking_lot = "0.12.3"
 itoa = "1.0.14"
-
-[profile.release]
-debug = true
