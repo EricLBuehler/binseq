@@ -14,6 +14,8 @@ It uses 2-bit encoding for nucleotides and focuses exclusively on sequence data,
 
 For variable length reads and quality score support consider using [VBINSEQ](https://github.com/arcinstitute/vbinseq).
 
+This is a rust library for reading and writing BINSEQ files, for a command-line interface see [bqtools](https://github.com/arcinstitute/bqtools).
+
 ## File Structure
 
 A BINSEQ file consists of two sections:
