@@ -1,5 +1,10 @@
 # BINSEQ Format Specification
 
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.md)
+![actions status](https://github.com/arcinstitute/binseq/workflows/CI/badge.svg)
+[![Crates.io](https://img.shields.io/crates/d/binseq?color=orange&label=crates.io)](https://crates.io/crates/binseq)
+[![docs.rs](https://img.shields.io/docsrs/binseq?color=green&label=docs.rs)](https://docs.rs/binseq/latest/binseq/)
+
 Version 1.0
 
 ## Overview
