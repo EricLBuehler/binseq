@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::*;
+use binseq::{bq, BinseqRecord, ParallelProcessor};
 use nucgen::Sequence;
 
 #[derive(Clone, Default)]
@@ -24,17 +24,17 @@ impl MyProcessor {
     }
 }
 impl ParallelProcessor for MyProcessor {
-    fn process_record(&mut self, record: RefRecord) -> Result<(), binseq::Error> {
+    fn process_record<R: BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
         self.sbuf.clear();
         self.xbuf.clear();
         record.decode_s(&mut self.sbuf)?;
-        if record.paired() {
+        if record.is_paired() {
             record.decode_x(&mut self.xbuf)?;
         }
         self.local_counter += 1;
         Ok(())
     }
-    fn on_batch_complete(&mut self) -> Result<(), binseq::Error> {
+    fn on_batch_complete(&mut self) -> binseq::Result<()> {
         self.counter
             .fetch_add(self.local_counter, Ordering::Relaxed);
         self.local_counter = 0;
@@ -43,7 +43,7 @@ impl ParallelProcessor for MyProcessor {
 }
 
 fn mmap_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
-    let reader = MmapReader::new(binseq_path)?;
+    let reader = bq::MmapReader::new(binseq_path)?;
     let proc = MyProcessor::default();
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
@@ -112,9 +112,9 @@ where
 
 fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()> {
     // Open the output file
-    let header = BinseqHeader::new(seq_size as u32);
+    let header = bq::BinseqHeader::new(seq_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriterBuilder::default()
+    let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)
         .build(out_handle)?;
 
@@ -137,9 +137,9 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
 
 fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usize) -> Result<()> {
     // Open the output file
-    let header = BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
+    let header = bq::BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriterBuilder::default()
+    let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)
         .build(out_handle)?;
 

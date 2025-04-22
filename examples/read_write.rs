@@ -4,7 +4,10 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::{BinseqHeader, BinseqWriterBuilder, MmapReader};
+use binseq::{
+    bq::{BinseqHeader, BinseqWriterBuilder, MmapReader},
+    BinseqRecord,
+};
 use seq_io::fastq::{Reader, Record};
 
 fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Result<()> {
