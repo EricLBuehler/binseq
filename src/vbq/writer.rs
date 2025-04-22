@@ -804,7 +804,7 @@ impl<W: Write> VBinseqWriter<W> {
         &mut self.cblock
     }
 
-    /// Ingests data from another VBinseqWriter that uses a Vec<u8> as its inner writer
+    /// Ingests data from another VBinseqWriter that uses a `Vec<u8>` as its inner writer
     ///
     /// This method is particularly useful for parallel processing, where multiple writers
     /// might be writing to memory buffers and need to be combined into a single file. It
@@ -814,7 +814,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///
     /// # Parameters
     ///
-    /// * `other` - Another VBinseqWriter whose inner writer is a Vec<u8>
+    /// * `other` - Another VBinseqWriter whose inner writer is a `Vec<u8>`
     ///
     /// # Returns
     ///
