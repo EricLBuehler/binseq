@@ -44,7 +44,7 @@
 
 #![allow(clippy::module_inception)]
 
-/// BQ - fixed length, no quality scores
+/// BQ - fixed length records, no quality scores
 pub mod bq;
 
 /// Error definitions
@@ -59,7 +59,7 @@ mod policy;
 /// Record trait shared between BINSEQ variants
 mod record;
 
-/// VBQ - Variable length, optional quality scores, compressed blocks
+/// VBQ - Variable length records, optional quality scores, compressed blocks
 pub mod vbq;
 
 pub use error::{Error, Result};
