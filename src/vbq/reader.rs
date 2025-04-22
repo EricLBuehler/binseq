@@ -10,8 +10,10 @@ use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
-use crate::error::{ReadError, Result};
-use crate::{BinseqRecord, ParallelProcessor};
+use crate::{
+    error::{ReadError, Result},
+    BinseqRecord, ParallelProcessor,
+};
 
 /// Calculates the number of 64-bit words needed to store a nucleotide sequence of the given length
 ///
