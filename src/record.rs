@@ -1,5 +1,11 @@
 use super::Result;
 
+/// Record trait shared between BINSEQ variants.
+///
+/// Exposes public methods for accessing internal data.
+/// Interfaces with the [`bitnuc`] crate for decoding sequences.
+///
+/// Used to interact with [`ParallelProcessor`](crate::ParallelProcessor) for easy parallel processing.
 pub trait BinseqRecord {
     /// Returns the global index of the record.
     fn index(&self) -> u64;
