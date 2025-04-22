@@ -53,6 +53,24 @@ pub trait BinseqRecord {
         Ok(())
     }
 
+    /// Decodes the primary sequence of this record into a newly allocated buffer.
+    ///
+    /// Not advised to use this function as it allocates a new buffer every time.
+    fn decode_s_alloc(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(self.slen() as usize);
+        self.decode_s(&mut buf)?;
+        Ok(buf)
+    }
+
+    /// Decodes the extended sequence of this record into a newly allocated buffer.
+    ///
+    /// Not advised to use this function as it allocates a new buffer every time.
+    fn decode_x_alloc(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(self.xlen() as usize);
+        self.decode_x(&mut buf)?;
+        Ok(buf)
+    }
+
     /// A convenience function to check if the record is paired.
     fn is_paired(&self) -> bool {
         self.xlen() > 0
