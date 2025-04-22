@@ -12,9 +12,11 @@ use std::io::Write;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{rngs::SmallRng, SeedableRng};
 
-use crate::bq::BinseqHeader;
-use crate::error::{Result, WriteError};
-use crate::{Policy, RNG_SEED};
+use super::BinseqHeader;
+use crate::{
+    error::{Result, WriteError},
+    Policy, RNG_SEED,
+};
 
 /// Writes a single flag value to a writer in little-endian format
 ///

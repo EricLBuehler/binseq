@@ -11,9 +11,11 @@ use std::sync::Arc;
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
-use crate::bq::header::{BinseqHeader, SIZE_HEADER};
-use crate::error::{ReadError, Result};
-use crate::{BinseqRecord, ParallelProcessor};
+use super::header::{BinseqHeader, SIZE_HEADER};
+use crate::{
+    error::{ReadError, Result},
+    BinseqRecord, ParallelProcessor,
+};
 
 /// A reference to a binary sequence record in a memory-mapped file
 ///
