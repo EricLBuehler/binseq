@@ -75,6 +75,17 @@ pub enum ReadError {
     /// * Second `usize` - The maximum available record index
     #[error("Requested record index ({0}) is out of record range ({1})")]
     OutOfRange(usize, usize),
+    
+    /// End of stream was reached while reading
+    #[error("End of stream reached")]
+    EndOfStream,
+    
+    /// A partial record was encountered at the end of a stream
+    ///
+    /// # Arguments
+    /// * `usize` - The number of bytes read in the partial record
+    #[error("Partial record at end of stream ({0} bytes)")]
+    PartialRecord(usize),
 }
 
 /// Errors that can occur while writing binary sequence data

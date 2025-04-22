@@ -1,17 +1,21 @@
 //! Binary sequence reader module
 //!
-//! This module provides functionality for reading binary sequence files using memory mapping
-//! for efficient access. It supports both sequential and parallel processing of records,
+//! This module provides functionality for reading binary sequence files using either:
+//! 1. Memory mapping for efficient access to entire files
+//! 2. Streaming for processing data as it arrives
+//!
+//! It supports both sequential and parallel processing of records,
 //! with configurable record layouts for different sequence types.
 
 use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
-use crate::error::{ReadError, Result};
+use crate::error::{Error, ReadError, Result};
 use crate::header::{BinseqHeader, SIZE_HEADER};
 use crate::ParallelProcessor;
 
@@ -342,6 +346,217 @@ impl MmapReader {
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
         Ok(RefRecord::new(idx, buffer, self.config))
+    }
+}
+
+/// A reader for streaming binary sequence data from any source that implements Read
+///
+/// Unlike `MmapReader` which requires the entire file to be accessible at once,
+/// `StreamReader` processes data as it becomes available, making it suitable for:
+/// - Processing data as it arrives over a network
+/// - Handling very large files that exceed available memory
+/// - Pipeline processing where data is flowing continuously
+///
+/// The reader maintains an internal buffer and can handle partial record reconstruction
+/// across chunk boundaries.
+pub struct StreamReader<R: Read> {
+    /// The source reader for binary sequence data
+    reader: R,
+    
+    /// Binary sequence file header containing format information
+    header: Option<BinseqHeader>,
+    
+    /// Configuration defining the layout of records in the file
+    config: Option<RecordConfig>,
+    
+    /// Buffer for storing incoming data
+    buffer: Vec<u8>,
+    
+    /// Current position in the buffer
+    buffer_pos: usize,
+    
+    /// Length of valid data in the buffer
+    buffer_len: usize,
+}
+
+impl<R: Read> StreamReader<R> {
+    /// Creates a new StreamReader with the default buffer size
+    ///
+    /// This constructor initializes a StreamReader that will read from the provided
+    /// source, using an 8K default buffer size.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The source to read binary sequence data from
+    ///
+    /// # Returns
+    ///
+    /// A new `StreamReader` instance
+    pub fn new(reader: R) -> Self {
+        Self::with_capacity(reader, 8192)
+    }
+    
+    /// Creates a new StreamReader with a specified buffer capacity
+    ///
+    /// This constructor initializes a StreamReader with a custom buffer size,
+    /// which can be tuned based on the expected usage pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The source to read binary sequence data from
+    /// * `capacity` - The size of the internal buffer in bytes
+    ///
+    /// # Returns
+    ///
+    /// A new `StreamReader` instance with the specified buffer capacity
+    pub fn with_capacity(reader: R, capacity: usize) -> Self {
+        Self {
+            reader,
+            header: None,
+            config: None,
+            buffer: vec![0; capacity],
+            buffer_pos: 0,
+            buffer_len: 0,
+            // buffer_capacity: capacity,
+        }
+    }
+    
+    /// Reads and validates the header from the underlying reader
+    ///
+    /// This method reads the binary sequence file header and validates it.
+    /// It caches the header internally for future use.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(&BinseqHeader)` - A reference to the validated header
+    /// * `Err(Error)` - If reading or validating the header fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * There is an I/O error when reading from the source
+    /// * The header data is invalid
+    /// * End of stream is reached before the full header can be read
+    pub fn read_header(&mut self) -> Result<&BinseqHeader> {
+        if self.header.is_some() {
+            return Ok(self.header.as_ref().unwrap());
+        }
+        
+        // Ensure we have enough data for the header
+        while self.buffer_len - self.buffer_pos < SIZE_HEADER {
+            self.fill_buffer()?;
+        }
+        
+        // Parse header
+        let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
+        let header = BinseqHeader::from_buffer(header_slice)?;
+        
+        self.header = Some(header);
+        self.config = Some(RecordConfig::from_header(&header));
+        self.buffer_pos += SIZE_HEADER;
+        
+        Ok(self.header.as_ref().unwrap())
+    }
+    
+    /// Fills the internal buffer with more data from the reader
+    ///
+    /// This method reads more data from the underlying reader, handling
+    /// the case where some unprocessed data remains in the buffer.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the buffer was successfully filled with new data
+    /// * `Err(Error)` - If reading from the source fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * There is an I/O error when reading from the source
+    /// * End of stream is reached (no more data available)
+    fn fill_buffer(&mut self) -> Result<()> {
+        // Move remaining data to beginning of buffer if needed
+        if self.buffer_pos > 0 && self.buffer_pos < self.buffer_len {
+            self.buffer.copy_within(self.buffer_pos..self.buffer_len, 0);
+            self.buffer_len -= self.buffer_pos;
+            self.buffer_pos = 0;
+        } else if self.buffer_pos == self.buffer_len {
+            self.buffer_len = 0;
+            self.buffer_pos = 0;
+        }
+        
+        // Read more data
+        let bytes_read = self.reader.read(&mut self.buffer[self.buffer_len..])?;
+        if bytes_read == 0 {
+            return Err(ReadError::EndOfStream.into());
+        }
+        
+        self.buffer_len += bytes_read;
+        Ok(())
+    }
+    
+    /// Retrieves the next record from the stream
+    ///
+    /// This method reads and processes the next complete record from the stream.
+    /// It handles the case where a record spans multiple buffer fills.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(RefRecord))` - The next record was successfully read
+    /// * `Ok(None)` - End of stream was reached (no more records)
+    /// * `Err(Error)` - If an error occurred during reading
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * There is an I/O error when reading from the source
+    /// * The header has not been read yet
+    /// * The data format is invalid
+    pub fn next_record(&mut self) -> Result<Option<RefRecord>> {
+        // Ensure header is read
+        if self.header.is_none() {
+            self.read_header()?;
+        }
+        
+        let config = self.config.unwrap();
+        let record_size = config.record_size_bytes();
+        
+        // Ensure we have enough data for a complete record
+        while self.buffer_len - self.buffer_pos < record_size {
+            match self.fill_buffer() {
+                Ok(_) => {}
+                Err(Error::ReadError(ReadError::EndOfStream)) => {
+                    // End of stream reached - if we have any partial data, it's an error
+                    if self.buffer_len - self.buffer_pos > 0 {
+                        return Err(ReadError::PartialRecord(self.buffer_len - self.buffer_pos).into());
+                    }
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        
+        // Process record
+        let record_start = self.buffer_pos;
+        self.buffer_pos += record_size;
+        
+        let record_bytes = &self.buffer[record_start..record_start + record_size];
+        let record_u64s = cast_slice(record_bytes);
+        
+        // Create record with incremental ID (based on read position)
+        let id = (record_start - SIZE_HEADER) / record_size;
+        Ok(Some(RefRecord::new(id, record_u64s, config)))
+    }
+    
+    /// Consumes the stream reader and returns the inner reader
+    ///
+    /// This method is useful when you need access to the underlying reader
+    /// after processing is complete.
+    ///
+    /// # Returns
+    ///
+    /// The inner reader that was used by this StreamReader
+    pub fn into_inner(self) -> R {
+        self.reader
     }
 }
 

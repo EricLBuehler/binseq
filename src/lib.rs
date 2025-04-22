@@ -6,20 +6,26 @@
 //! nucleotide sequences. It offers:
 //!
 //! - Compact 2-bit encoding of nucleotide sequences
-//! - Memory-mapped file access for efficient reading
+//! - Memory-mapped file access for efficient reading of entire files
+//! - Streaming support for processing data as it arrives
 //! - Parallel processing capabilities
 //! - Configurable policies for handling invalid nucleotides
 //! - Support for both single and paired-end sequences
 //!
 //! # Core Components
 //!
-//! - [`BinseqWriter`]: Writes sequences to binary format
-//! - [`MmapReader`]: Reads sequences using memory mapping
-//! - [`BinseqHeader`]: Defines file format and sequence lengths
-//! - [`Policy`]: Configures invalid nucleotide handling
-//! - [`ParallelProcessor`]: Enables parallel sequence processing
+//! - Writers:
+//!   - [`BinseqWriter`]: Writes sequences to binary format
+//!   - [`StreamWriter`]: Writes sequences with buffering for streaming scenarios
+//! - Readers:
+//!   - [`MmapReader`]: Reads sequences using memory mapping for entire files
+//!   - [`StreamReader`]: Reads sequences as they arrive for streaming scenarios
+//! - Common Components:
+//!   - [`BinseqHeader`]: Defines file format and sequence lengths
+//!   - [`Policy`]: Configures invalid nucleotide handling
+//!   - [`ParallelProcessor`]: Enables parallel sequence processing
 //!
-//! # Example
+//! # Example: Memory-mapped Access
 //!
 //! ```
 //! use binseq::{BinseqHeader, BinseqWriterBuilder, MmapReader, Policy, Result};
@@ -40,6 +46,43 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Example: Streaming Access
+//!
+//! ```
+//! use binseq::{BinseqHeader, StreamReader, StreamWriterBuilder, Policy, Result};
+//! use std::io::{BufReader, Cursor};
+//!
+//! fn main() -> Result<()> {
+//!     // Create a header for sequences of length 100
+//!     let header = BinseqHeader::new(100);
+//!
+//!     // Create a stream writer
+//!     let mut writer = StreamWriterBuilder::default()
+//!         .header(header)
+//!         .buffer_capacity(8192)
+//!         .build(Cursor::new(Vec::new()))?;
+//!
+//!     // Write sequences
+//!     let sequence = b"ACGT".repeat(25); // 100 nucleotides
+//!     writer.write_nucleotides(0, &sequence)?;
+//!
+//!     // Get the inner buffer
+//!     let buffer = writer.into_inner()?;
+//!     let data = buffer.into_inner();
+//!
+//!     // Create a stream reader
+//!     let mut reader = StreamReader::new(BufReader::new(Cursor::new(data)));
+//!     
+//!     // Process records as they arrive
+//!     while let Some(record) = reader.next_record()? {
+//!         // Process each record
+//!         let flag = record.flag();
+//!     }
+//!
+//!     Ok(())
+//! }
+//! ```
 
 #![allow(clippy::module_inception)]
 
@@ -55,9 +98,9 @@ pub use error::{Error, HeaderError, ReadError, Result, WriteError};
 pub use header::{BinseqHeader, SIZE_HEADER};
 pub use parallel::ParallelProcessor;
 pub use policy::{Policy, RNG_SEED};
-pub use reader::{MmapReader, RefRecord};
+pub use reader::{MmapReader, RefRecord, StreamReader};
 pub use utils::expected_file_size;
-pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder};
+pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder, StreamWriter, StreamWriterBuilder};
 
 // #[cfg(test)]
 // mod testing {

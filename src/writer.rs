@@ -7,7 +7,7 @@
 //! - Efficient buffering and encoding
 //! - Headless mode for parallel writing
 
-use std::io::Write;
+use std::io::{BufWriter, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{rngs::SmallRng, SeedableRng};
@@ -429,7 +429,7 @@ impl<W: Write> BinseqWriter<W> {
     /// This allows direct access to the underlying writer while retaining
     /// ownership of the `BinseqWriter`.
     pub fn by_ref(&mut self) -> &mut W {
-        self.inner.by_ref()
+        &mut self.inner
     }
 
     /// Flushes any buffered data to the underlying writer
@@ -487,9 +487,212 @@ impl<W: Write> BinseqWriter<W> {
     /// * `Err(Error)` - If writing the contents failed
     pub fn ingest(&mut self, other: &mut BinseqWriter<Vec<u8>>) -> Result<()> {
         let other_inner = other.by_ref();
-        self.inner.write_all(other_inner.by_ref())?;
+        self.inner.write_all(other_inner)?;
         other_inner.clear();
         Ok(())
+    }
+}
+
+/// A streaming writer for binary sequence data
+///
+/// This writer buffers data before writing it to the underlying writer,
+/// providing efficient streaming capabilities suitable for:
+/// - Writing to network connections
+/// - Processing very large datasets
+/// - Pipeline processing
+///
+/// The `StreamWriter` is a specialized version of `BinseqWriter` that
+/// adds internal buffering and is optimized for streaming scenarios.
+pub struct StreamWriter<W: Write> {
+    /// The underlying writer for processing sequences
+    writer: BinseqWriter<BufWriter<W>>,
+}
+
+impl<W: Write> StreamWriter<W> {
+    /// Creates a new StreamWriter with the default buffer size
+    ///
+    /// This constructor initializes a StreamWriter with an 8K buffer
+    /// for efficient writing to the underlying writer.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The writer to write binary sequence data to
+    /// * `header` - The header defining sequence lengths and format
+    /// * `policy` - The policy for handling invalid nucleotides
+    /// * `headless` - Whether to skip writing the header
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(StreamWriter)` - A new streaming writer
+    /// * `Err(Error)` - If initialization fails
+    pub fn new(inner: W, header: BinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
+        Self::with_capacity(inner, 8192, header, policy, headless)
+    }
+
+    /// Creates a new StreamWriter with a specified buffer capacity
+    ///
+    /// This constructor allows customizing the buffer size based on
+    /// expected usage patterns and performance requirements.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The writer to write binary sequence data to
+    /// * `capacity` - The size of the internal buffer in bytes
+    /// * `header` - The header defining sequence lengths and format
+    /// * `policy` - The policy for handling invalid nucleotides
+    /// * `headless` - Whether to skip writing the header
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(StreamWriter)` - A new streaming writer with the specified buffer capacity
+    /// * `Err(Error)` - If initialization fails
+    pub fn with_capacity(
+        inner: W,
+        capacity: usize,
+        header: BinseqHeader,
+        policy: Policy,
+        headless: bool,
+    ) -> Result<Self> {
+        let buffered = BufWriter::with_capacity(capacity, inner);
+        let writer = BinseqWriter::new(buffered, header, policy, headless)?;
+
+        Ok(Self { writer })
+    }
+
+    /// Writes a single nucleotide sequence to the output
+    ///
+    /// This method encodes and writes a primary sequence along with an associated flag.
+    /// The sequence must match the length specified in the header.
+    ///
+    /// # Arguments
+    ///
+    /// * `flag` - A 64-bit flag value associated with the sequence
+    /// * `primary` - The nucleotide sequence to write
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If the sequence was successfully written
+    /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
+    /// * `Err(Error)` - If an error occurred during writing
+    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
+        self.writer.write_nucleotides(flag, primary)
+    }
+
+    /// Writes a pair of nucleotide sequences to the output
+    ///
+    /// This method encodes and writes both a primary sequence and an extended sequence
+    /// (e.g., quality scores) along with an associated flag. Both sequences must
+    /// match their respective lengths specified in the header.
+    ///
+    /// # Arguments
+    ///
+    /// * `flag` - A 64-bit flag value associated with the sequences
+    /// * `primary` - The primary nucleotide sequence
+    /// * `extended` - The extended sequence (e.g., quality scores)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If both sequences were successfully written
+    /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
+    /// * `Err(Error)` - If an error occurred during writing
+    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
+        self.writer.write_paired(flag, primary, extended)
+    }
+
+    /// Flushes any buffered data to the underlying writer
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the flush was successful
+    /// * `Err(Error)` - If flushing failed
+    pub fn flush(&mut self) -> Result<()> {
+        self.writer.flush()
+    }
+
+    /// Consumes the streaming writer and returns the inner writer after flushing
+    ///
+    /// This method is useful when you need access to the underlying writer
+    /// after all writing is complete.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(W)` - The inner writer after flushing all data
+    /// * `Err(Error)` - If flushing failed
+    pub fn into_inner(self) -> Result<W> {
+        // First unwrap the writer inner (BufWriter<W>)
+        let bufw = self.writer.into_inner();
+        // Now unwrap the BufWriter to get W
+        match bufw.into_inner() {
+            Ok(inner) => Ok(inner),
+            Err(e) => Err(std::io::Error::from(e).into()),
+        }
+    }
+}
+
+/// Builder for StreamWriter instances
+///
+/// This builder provides a convenient way to create and configure StreamWriter
+/// instances with custom buffer sizes and other settings.
+#[derive(Default)]
+pub struct StreamWriterBuilder {
+    /// Required header defining sequence lengths and format
+    header: Option<BinseqHeader>,
+    /// Optional policy for handling invalid nucleotides
+    policy: Option<Policy>,
+    /// Optional headless mode for parallel writing scenarios
+    headless: Option<bool>,
+    /// Optional buffer capacity setting
+    buffer_capacity: Option<usize>,
+}
+
+impl StreamWriterBuilder {
+    /// Sets the header for the writer
+    pub fn header(mut self, header: BinseqHeader) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    /// Sets the policy for handling invalid nucleotides
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    /// Sets headless mode (whether to skip writing the header)
+    pub fn headless(mut self, headless: bool) -> Self {
+        self.headless = Some(headless);
+        self
+    }
+
+    /// Sets the buffer capacity for the writer
+    pub fn buffer_capacity(mut self, capacity: usize) -> Self {
+        self.buffer_capacity = Some(capacity);
+        self
+    }
+
+    /// Builds a StreamWriter with the configured settings
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The writer to write binary sequence data to
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(StreamWriter)` - A new streaming writer with the specified configuration
+    /// * `Err(Error)` - If building the writer fails
+    pub fn build<W: Write>(self, inner: W) -> Result<StreamWriter<W>> {
+        let Some(header) = self.header else {
+            return Err(WriteError::MissingHeader.into());
+        };
+
+        let capacity = self.buffer_capacity.unwrap_or(8192);
+        StreamWriter::with_capacity(
+            inner,
+            capacity,
+            header,
+            self.policy.unwrap_or_default(),
+            self.headless.unwrap_or(false),
+        )
     }
 }
 
@@ -549,6 +752,20 @@ mod testing {
         // delete file
         std::fs::remove_file(path)?;
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_writer() -> Result<()> {
+        let inner = Vec::new();
+        let writer = StreamWriterBuilder::default()
+            .header(BinseqHeader::new(32))
+            .buffer_capacity(16384)
+            .build(inner)?;
+
+        // Convert back to Vec to verify it works
+        let inner = writer.into_inner()?;
+        assert_eq!(inner.len(), SIZE_HEADER);
         Ok(())
     }
 }
