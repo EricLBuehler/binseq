@@ -11,9 +11,9 @@ use std::sync::Arc;
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
+use crate::bq::header::{BinseqHeader, SIZE_HEADER};
 use crate::error::{ReadError, Result};
-use crate::header::{BinseqHeader, SIZE_HEADER};
-use crate::ParallelProcessor;
+use crate::{BinseqRecord, ParallelProcessor};
 
 /// A reference to a binary sequence record in a memory-mapped file
 ///
@@ -28,7 +28,7 @@ use crate::ParallelProcessor;
 #[derive(Clone, Copy)]
 pub struct RefRecord<'a> {
     /// The position (index) of this record in the file (0-based record index, not byte offset)
-    id: usize,
+    id: u64,
     /// The underlying u64 buffer representing the record's binary data
     buffer: &'a [u64],
     /// The configuration that defines the layout and size of record components
@@ -46,83 +46,36 @@ impl<'a> RefRecord<'a> {
     /// # Panics
     ///
     /// Panics if the buffer length doesn't match the expected size from the config
-    pub fn new(id: usize, buffer: &'a [u64], config: RecordConfig) -> Self {
+    pub fn new(id: u64, buffer: &'a [u64], config: RecordConfig) -> Self {
         assert_eq!(buffer.len(), config.record_size_u64());
         Self { id, buffer, config }
     }
-    /// Returns the record's position (index) in the file
-    pub fn id(&self) -> usize {
-        self.id
-    }
-
-    /// Returns the record's flag value
-    ///
-    /// The flag is stored in the first u64 of the record and can contain
-    /// various metadata about the sequence.
-    pub fn flag(&self) -> u64 {
-        self.buffer[0]
-    }
-
-    /// Returns a reference to the primary sequence data buffer
-    ///
-    /// The returned slice contains the compressed nucleotide sequence,
-    /// where each u64 stores up to 32 nucleotides.
-    pub fn sbuf(&self) -> &[u64] {
-        &self.buffer[1..1 + self.config.schunk]
-    }
-
-    /// Returns a reference to the extended sequence data buffer
-    ///
-    /// The returned slice contains the compressed extended data (e.g., quality scores),
-    /// where each u64 stores 32 values.
-    pub fn xbuf(&self) -> &[u64] {
-        &self.buffer[1 + self.config.schunk..]
-    }
-    /// Decodes the primary sequence into a byte buffer
-    ///
-    /// This method decompresses the binary sequence data into standard nucleotide
-    /// representation (A, C, G, T).
-    ///
-    /// # Arguments
-    ///
-    /// * `dbuf` - The buffer to store the decoded sequence
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the decoding process fails
-    pub fn decode_s(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.sbuf(), self.config.slen, dbuf)?;
-        Ok(())
-    }
-
-    /// Decodes the extended sequence data into a byte buffer
-    ///
-    /// This method decompresses the binary extended data (e.g., quality scores)
-    /// into its original representation.
-    ///
-    /// # Arguments
-    ///
-    /// * `dbuf` - The buffer to store the decoded data
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the decoding process fails
-    pub fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf(), self.config.xlen, dbuf)?;
-        Ok(())
-    }
-    /// Returns whether this record contains extended sequence data
-    ///
-    /// A record is considered paired if it has a non-zero extended sequence length.
-    pub fn paired(&self) -> bool {
-        self.config.paired()
-    }
-
     /// Returns the record's configuration
     ///
     /// The configuration defines the layout and size of the record's components.
     pub fn config(&self) -> RecordConfig {
         self.config
+    }
+}
+
+impl<'a> BinseqRecord for RefRecord<'a> {
+    fn index(&self) -> u64 {
+        self.id
+    }
+    fn flag(&self) -> u64 {
+        self.buffer[0]
+    }
+    fn slen(&self) -> u64 {
+        self.config.slen
+    }
+    fn xlen(&self) -> u64 {
+        self.config.xlen
+    }
+    fn sbuf(&self) -> &[u64] {
+        &self.buffer[1..1 + self.config.schunk as usize]
+    }
+    fn xbuf(&self) -> &[u64] {
+        &self.buffer[1 + self.config.schunk as usize..]
     }
 }
 
@@ -135,15 +88,15 @@ impl<'a> RefRecord<'a> {
 #[derive(Clone, Copy)]
 pub struct RecordConfig {
     /// The primary sequence length in base pairs
-    slen: usize,
+    slen: u64,
     /// The extended sequence length in base pairs
-    xlen: usize,
+    xlen: u64,
     /// The number of u64 chunks needed to store the primary sequence
     /// (each u64 stores 32 nucleotides)
-    schunk: usize,
+    schunk: u64,
     /// The number of u64 chunks needed to store the extended sequence
     /// (each u64 stores 32 values)
-    xchunk: usize,
+    xchunk: u64,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -161,10 +114,10 @@ impl RecordConfig {
     /// A new `RecordConfig` instance with the specified sequence lengths
     pub fn new(slen: usize, xlen: usize) -> Self {
         Self {
-            slen,
-            xlen,
-            schunk: slen.div_ceil(32),
-            xchunk: xlen.div_ceil(32),
+            slen: slen as u64,
+            xlen: xlen as u64,
+            schunk: (slen as u64).div_ceil(32),
+            xchunk: (xlen as u64).div_ceil(32),
         }
     }
 
@@ -195,14 +148,14 @@ impl RecordConfig {
     ///
     /// This method returns the length of the primary sequence in base pairs.
     pub fn slen(&self) -> usize {
-        self.slen
+        self.slen as usize
     }
 
     /// Returns the extended sequence length in base pairs
     ///
     /// This method returns the length of the extended sequence in base pairs.
     pub fn xlen(&self) -> usize {
-        self.xlen
+        self.xlen as usize
     }
 
     /// Returns the number of u64 chunks needed to store the primary sequence
@@ -210,7 +163,7 @@ impl RecordConfig {
     /// This method returns the number of u64 chunks required to store the primary
     /// sequence, where each u64 stores 32 nucleotides.
     pub fn schunk(&self) -> usize {
-        self.schunk
+        self.schunk as usize
     }
 
     /// Returns the number of u64 chunks needed to store the extended sequence
@@ -218,7 +171,7 @@ impl RecordConfig {
     /// This method returns the number of u64 chunks required to store the extended
     /// sequence, where each u64 stores 32 values.
     pub fn xchunk(&self) -> usize {
-        self.xchunk
+        self.xchunk as usize
     }
 
     /// Returns the full record size in bytes (u8):
@@ -230,7 +183,7 @@ impl RecordConfig {
     /// Returns the full record size in u64
     /// schunk + xchunk + 1 (flag)
     pub fn record_size_u64(&self) -> usize {
-        self.schunk + self.xchunk + 1
+        (self.schunk + self.xchunk + 1) as usize
     }
 }
 
@@ -341,7 +294,7 @@ impl MmapReader {
         let rbound = lbound + self.config.record_size_bytes();
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
-        Ok(RefRecord::new(idx, buffer, self.config))
+        Ok(RefRecord::new(idx as u64, buffer, self.config))
     }
 }
 

@@ -12,7 +12,9 @@ use std::io::Write;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{rngs::SmallRng, SeedableRng};
 
-use crate::{error::WriteError, BinseqHeader, Policy, Result, RNG_SEED};
+use crate::bq::BinseqHeader;
+use crate::error::{Result, WriteError};
+use crate::{Policy, RNG_SEED};
 
 /// Writes a single flag value to a writer in little-endian format
 ///
@@ -312,7 +314,7 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, BinseqWriter, Policy, Result};
+    /// # use binseq::bq::{BinseqHeader, BinseqWriter, Policy, Result};
     /// # fn main() -> Result<()> {
     /// let header = BinseqHeader::new(100);
     /// let writer = BinseqWriter::new(
@@ -499,7 +501,7 @@ mod testing {
     use std::{fs::File, io::BufWriter};
 
     use super::*;
-    use crate::SIZE_HEADER;
+    use crate::bq::SIZE_HEADER;
 
     #[test]
     fn test_headless() -> Result<()> {

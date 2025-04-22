@@ -6,7 +6,7 @@
 
 use rand::Rng;
 
-use crate::{error::WriteError, Result};
+use crate::error::{Result, WriteError};
 
 /// A global seed for the random number generator used in randomized policies
 ///

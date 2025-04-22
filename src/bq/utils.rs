@@ -4,7 +4,7 @@
 //! calculating file sizes and other utility operations related to
 //! binary sequence files.
 
-use crate::header::SIZE_HEADER;
+use crate::bq::header::SIZE_HEADER;
 
 /// Calculates the expected size in bytes of a binary sequence file
 ///

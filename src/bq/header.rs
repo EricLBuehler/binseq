@@ -7,7 +7,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 
-use crate::{error::Result, HeaderError};
+use crate::error::{HeaderError, Result};
 
 /// Current magic number: "BSEQ" in ASCII (in little-endian byte order)
 ///
