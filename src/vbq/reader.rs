@@ -41,7 +41,7 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use vbinseq::MmapReader;
+/// use binseq::vbq::MmapReader;
 ///
 /// let reader = MmapReader::new("example.vbq").unwrap();
 /// let mut block = reader.new_block(); // Create a block with appropriate size
@@ -122,7 +122,8 @@ impl RecordBlock {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::MmapReader;
+    /// use binseq::vbq::MmapReader;
+    /// use binseq::BinseqRecord;
     ///
     /// let mut reader = MmapReader::new("example.vbq").unwrap();
     /// let mut block = reader.new_block();
@@ -392,7 +393,8 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use vbinseq::MmapReader;
+/// use binseq::vbq::MmapReader;
+/// use binseq::BinseqRecord;
 ///
 /// let mut reader = MmapReader::new("example.vbq").unwrap();
 /// let mut block = reader.new_block();
@@ -514,7 +516,7 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use vbinseq::MmapReader;
+/// use binseq::vbq::MmapReader;
 ///
 /// // Open a VBINSEQ file
 /// let mut reader = MmapReader::new("example.vbq").unwrap();
@@ -568,7 +570,7 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::MmapReader;
+    /// use binseq::vbq::MmapReader;
     ///
     /// let reader = MmapReader::new("path/to/file.vbq").unwrap();
     /// ```
@@ -610,7 +612,7 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::MmapReader;
+    /// use binseq::vbq::MmapReader;
     ///
     /// let reader = MmapReader::new("example.vbq").unwrap();
     /// let mut block = reader.new_block();
@@ -669,7 +671,8 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::MmapReader;
+    /// use binseq::vbq::MmapReader;
+    /// use binseq::BinseqRecord;
     /// use std::io::Write;
     ///
     /// let mut reader = MmapReader::new("example.vbq").unwrap();
@@ -750,7 +753,7 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::MmapReader;
+    /// use binseq::vbq::MmapReader;
     ///
     /// let reader = MmapReader::new("example.vbq").unwrap();
     ///
@@ -819,7 +822,8 @@ impl MmapReader {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{MmapReader, ParallelProcessor, RefRecord, Result};
+    /// use binseq::vbq::{MmapReader, RefRecord};
+    /// use binseq::{ParallelProcessor, BinseqRecord, Result};
     /// use std::sync::atomic::{AtomicUsize, Ordering};
     /// use std::sync::Arc;
     ///
@@ -852,7 +856,7 @@ impl MmapReader {
     /// }
     ///
     /// impl ParallelProcessor for RecordCounter {
-    ///     fn process_record(&mut self, _record: RefRecord) -> Result<()> {
+    ///     fn process_record<R: BinseqRecord>(&mut self, _record: R) -> Result<()> {
     ///         self.count.fetch_add(1, Ordering::Relaxed);
     ///         Ok(())
     ///     }

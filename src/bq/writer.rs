@@ -93,7 +93,7 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, Encoder};
+    /// # use binseq::bq::{BinseqHeader, Encoder};
     /// let header = BinseqHeader::new(100); // For sequences of length 100
     /// let encoder = Encoder::new(header);
     /// ```
@@ -111,7 +111,8 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, Encoder, Policy};
+    /// # use binseq::bq::{BinseqHeader, Encoder};
+    /// # use binseq::Policy;
     /// let header = BinseqHeader::new(100);
     /// let encoder = Encoder::with_policy(header, Policy::SetToA);
     /// ```
@@ -219,7 +220,8 @@ impl Encoder {
 /// # Examples
 ///
 /// ```
-/// # use binseq::{BinseqHeader, BinseqWriterBuilder, Policy, Result};
+/// # use binseq::{Policy, Result};
+/// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
 /// # fn main() -> Result<()> {
 /// let header = BinseqHeader::new(100);
 /// let writer = BinseqWriterBuilder::default()
@@ -314,7 +316,8 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, BinseqWriter, Policy, Result};
+    /// # use binseq::bq::{BinseqHeader, BinseqWriter};
+    /// # use binseq::{Result, Policy};
     /// # fn main() -> Result<()> {
     /// let header = BinseqHeader::new(100);
     /// let writer = BinseqWriter::new(
@@ -410,7 +413,8 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, BinseqWriterBuilder, Result};
+    /// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+    /// # use binseq::Result;
     /// # fn main() -> Result<()> {
     /// let header = BinseqHeader::new(100);
     /// let writer = BinseqWriterBuilder::default()

@@ -30,7 +30,7 @@ use crate::bq::header::SIZE_HEADER;
 /// # Examples
 ///
 /// ```
-/// use binseq::expected_file_size;
+/// use binseq::bq::expected_file_size;
 ///
 /// // For 1000 sequences of length 100
 /// let size = expected_file_size(1000, 100);

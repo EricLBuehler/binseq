@@ -136,7 +136,7 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use vbinseq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeader;
     ///
     /// // Create header with quality scores and compression, without paired sequences
     /// let header = VBinseqHeader::new(true, true, false);
@@ -157,7 +157,7 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use vbinseq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeader;
     ///
     /// // Create header with a 256KB block size, with quality scores and compression
     /// let header = VBinseqHeader::with_capacity(256 * 1024, true, true, false);
@@ -318,7 +318,7 @@ impl BlockHeader {
     /// # Example
     ///
     /// ```rust
-    /// use vbinseq::BlockHeader;
+    /// use binseq::vbq::BlockHeader;
     ///
     /// // Create a block header for a block with 1024 bytes and 100 records
     /// let header = BlockHeader::new(1024, 100);

@@ -28,7 +28,8 @@
 //! ```rust
 //! use std::fs::File;
 //! use std::io::BufWriter;
-//! use vbinseq::{VBinseqHeader, VBinseqWriterBuilder, MmapReader};
+//! use binseq::vbq::{VBinseqHeader, VBinseqWriterBuilder, MmapReader};
+//! use binseq::BinseqRecord;
 //!
 //! // Path to the output file
 //! let path_name = "some_example.vbq";

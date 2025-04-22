@@ -34,7 +34,7 @@ pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
 /// # Examples
 ///
 /// ```rust
-/// use vbinseq::BlockRange;
+/// use binseq::vbq::BlockRange;
 ///
 /// // Create a new block range
 /// let range = BlockRange::new(
@@ -101,7 +101,7 @@ impl BlockRange {
     /// # Examples
     ///
     /// ```rust
-    /// use vbinseq::BlockRange;
+    /// use binseq::vbq::BlockRange;
     ///
     /// // Create a new block range for a block starting at byte 1024
     /// let range = BlockRange::new(1024, 8192, 1000, 5000);
@@ -323,7 +323,7 @@ impl IndexHeader {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use vbinseq::{BlockIndex, MmapReader};
+/// use binseq::vbq::{BlockIndex, MmapReader};
 /// use std::path::Path;
 ///
 /// // Create an index from a VBINSEQ file
@@ -371,7 +371,7 @@ impl BlockIndex {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::BlockIndex;
+    /// use binseq::vbq::BlockIndex;
     /// use std::path::Path;
     ///
     /// let index = BlockIndex::from_path(Path::new("example.vbq.vqi")).unwrap();
@@ -400,7 +400,7 @@ impl BlockIndex {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::BlockIndex;
+    /// use binseq::vbq::BlockIndex;
     /// use std::path::Path;
     ///
     /// // Create an index from a VBINSEQ file
@@ -469,7 +469,7 @@ impl BlockIndex {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::BlockIndex;
+    /// use binseq::vbq::BlockIndex;
     /// use std::path::Path;
     ///
     /// // Create an index from a VBINSEQ file
@@ -585,7 +585,7 @@ impl BlockIndex {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::BlockIndex;
+    /// use binseq::vbq::BlockIndex;
     /// use std::path::Path;
     ///
     /// let index = BlockIndex::from_path(Path::new("example.vbq.vqi")).unwrap();

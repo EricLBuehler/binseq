@@ -22,7 +22,8 @@
 //! # Example
 //!
 //! ```
-//! use binseq::{BinseqHeader, BinseqWriterBuilder, MmapReader, Policy, Result};
+//! use binseq::bq::{BinseqHeader, BinseqWriterBuilder, MmapReader};
+//! use binseq::{Policy, Result};
 //! use std::io::Cursor;
 //!
 //! fn main() -> Result<()> {

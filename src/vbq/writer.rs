@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+//! use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
 //! use std::fs::File;
 //!
 //! // Create a VBINSEQ file writer
@@ -63,7 +63,7 @@ use crate::policy::{Policy, RNG_SEED};
 /// # Examples
 ///
 /// ```
-/// use vbinseq::writer::record_byte_size;
+/// use binseq::vbq::writer::record_byte_size;
 ///
 /// // Calculate storage for a single-end read with 2 sequence chunks
 /// let size = record_byte_size(2, 0);
@@ -92,7 +92,7 @@ pub fn record_byte_size(schunk: usize, xchunk: usize) -> usize {
 /// # Examples
 ///
 /// ```
-/// use vbinseq::writer::record_byte_size_quality;
+/// use binseq::vbq::writer::record_byte_size_quality;
 ///
 /// // Calculate storage for a single-end read with 2 sequence chunks
 /// // and 12 bases (which will have 12 quality score bytes)
@@ -112,7 +112,8 @@ pub fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen:
 /// # Examples
 ///
 /// ```rust,no_run
-/// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader, Policy};
+/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+/// use binseq::Policy;
 /// use std::fs::File;
 ///
 /// // Create a writer with custom settings
@@ -151,7 +152,7 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     ///
     /// // Create a header with 64KB blocks and quality scores
     /// let mut header = VBinseqHeader::with_capacity(65536, true, true, true);
@@ -181,7 +182,8 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, Policy};
+    /// use binseq::vbq::{VBinseqWriterBuilder};
+    /// use binseq::Policy;
     ///
     /// let builder = VBinseqWriterBuilder::default().policy(Policy::IgnoreSequence);
     /// ```
@@ -207,7 +209,7 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::VBinseqWriterBuilder;
+    /// use binseq::vbq::VBinseqWriterBuilder;
     ///
     /// // Create a headless writer for parallel writing
     /// let builder = VBinseqWriterBuilder::default().headless(true);
@@ -235,7 +237,7 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::VBinseqWriterBuilder;
+    /// use binseq::vbq::VBinseqWriterBuilder;
     /// use std::fs::File;
     ///
     /// let file = File::create("example.vbq").unwrap();
@@ -281,7 +283,7 @@ impl VBinseqWriterBuilder {
 /// instance with the appropriate settings.
 ///
 /// ```rust,no_run
-/// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
 /// use std::fs::File;
 ///
 /// // Create a writer for single-end reads
@@ -353,7 +355,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a header for paired-end reads
@@ -386,7 +388,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a header for sequences with quality scores
@@ -433,7 +435,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// let file = File::create("example.vbq").unwrap();
@@ -503,7 +505,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a header for paired-end reads
@@ -592,7 +594,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a header for sequences with quality scores
@@ -683,7 +685,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a header for paired-end reads with quality scores
@@ -769,7 +771,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// let file = File::create("example.vbq").unwrap();
@@ -828,7 +830,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use vbinseq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
     /// use std::fs::File;
     ///
     /// // Create a file writer
