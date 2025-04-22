@@ -44,11 +44,22 @@
 
 #![allow(clippy::module_inception)]
 
+/// BQ - fixed length, no quality scores
 pub mod bq;
+
+/// Error definitions
 pub mod error;
+
+/// Parallel processing
 mod parallel;
+
+/// Invalid nucleotide policy
 mod policy;
+
+/// Record trait shared between BINSEQ variants
 mod record;
+
+/// VBQ - Variable length, optional quality scores, compressed blocks
 pub mod vbq;
 
 pub use error::{Error, Result};
