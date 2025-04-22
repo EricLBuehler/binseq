@@ -58,7 +58,7 @@ impl<'a> RefRecord<'a> {
     }
 }
 
-impl<'a> BinseqRecord for RefRecord<'a> {
+impl BinseqRecord for RefRecord<'_> {
     fn index(&self) -> u64 {
         self.id
     }
