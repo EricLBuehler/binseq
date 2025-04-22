@@ -1,7 +1,7 @@
 mod header;
 mod reader;
 mod utils;
-pub mod writer;
+mod writer;
 
 pub use header::{BinseqHeader, SIZE_HEADER};
 pub use reader::{MmapReader, RefRecord};
