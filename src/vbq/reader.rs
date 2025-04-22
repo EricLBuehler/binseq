@@ -10,6 +10,7 @@ use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
+use crate::ParallelReader;
 use crate::{
     error::{ReadError, Result},
     BinseqRecord, ParallelProcessor,
@@ -793,7 +794,7 @@ impl MmapReader {
     }
 }
 
-impl MmapReader {
+impl ParallelReader for MmapReader {
     /// Processes all records in the file in parallel using multiple threads
     ///
     /// This method provides efficient parallel processing of VBINSEQ files by distributing
@@ -825,7 +826,7 @@ impl MmapReader {
     ///
     /// ```rust,no_run
     /// use binseq::vbq::{MmapReader, RefRecord};
-    /// use binseq::{ParallelProcessor, BinseqRecord, Result};
+    /// use binseq::{ParallelProcessor, ParallelReader, BinseqRecord, Result};
     /// use std::sync::atomic::{AtomicUsize, Ordering};
     /// use std::sync::Arc;
     ///
@@ -891,7 +892,7 @@ impl MmapReader {
     /// * The `set_tid` method is called with a unique thread ID before processing begins, which
     ///   can be used to distinguish between worker threads.
     /// * This method consumes the reader (takes ownership), as it's distributed across threads.
-    pub fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
         self,
         processor: P,
         num_threads: usize,

@@ -63,6 +63,6 @@ mod record;
 pub mod vbq;
 
 pub use error::{Error, Result};
-pub use parallel::ParallelProcessor;
+pub use parallel::{BinseqReader, ParallelProcessor, ParallelReader};
 pub use policy::{Policy, RNG_SEED};
 pub use record::BinseqRecord;

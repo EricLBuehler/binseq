@@ -14,7 +14,7 @@ use memmap2::Mmap;
 use super::header::{BinseqHeader, SIZE_HEADER};
 use crate::{
     error::{ReadError, Result},
-    BinseqRecord, ParallelProcessor,
+    BinseqRecord, ParallelProcessor, ParallelReader,
 };
 
 /// A reference to a binary sequence record in a memory-mapped file
@@ -307,7 +307,7 @@ impl MmapReader {
 pub const BATCH_SIZE: usize = 1024;
 
 /// Parallel processing implementation for memory-mapped readers
-impl MmapReader {
+impl ParallelReader for MmapReader {
     /// Processes all records in parallel using multiple threads
     ///
     /// This method distributes the records across the specified number of threads
@@ -327,7 +327,7 @@ impl MmapReader {
     ///
     /// * `Ok(())` - If all records were processed successfully
     /// * `Err(Error)` - If an error occurred during processing
-    pub fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
         self,
         processor: P,
         num_threads: usize,

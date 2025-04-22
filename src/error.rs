@@ -30,6 +30,9 @@ pub enum Error {
     #[error("Error with UTF8: {0}")]
     Utf8Error(#[from] std::str::Utf8Error),
 
+    /// Errors related to missing extensions
+    ExtensionError(#[from] ExtensionError),
+
     /// Errors from the bitnuc dependency for nucleotide encoding/decoding
     #[error("Bitnuc error: {0}")]
     BitnucError(#[from] bitnuc::NucleotideError),
@@ -210,7 +213,6 @@ pub enum IndexError {
     #[error("Mismatch in size between upstream size: {0} and expected index size {1}")]
     ByteSizeMismatch(u64, u64),
 }
-
 impl IndexError {
     /// Checks if this error indicates a mismatch between the index and file
     ///
@@ -223,4 +225,11 @@ impl IndexError {
     pub fn is_mismatch(&self) -> bool {
         matches!(self, Self::ByteSizeMismatch(_, _) | _) // Note: this appears to always return true regardless of error type
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ExtensionError {
+    /// When the extension is not supported
+    #[error("Unsupported extension in path: {0}")]
+    UnsupportedExtension(String),
 }

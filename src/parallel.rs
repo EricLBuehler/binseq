@@ -1,4 +1,47 @@
-use crate::{BinseqRecord, Result};
+use crate::{bq, error::ExtensionError, vbq, BinseqRecord, Result};
+
+/// An enum abstraction for BINSEQ readers that can process records in parallel
+///
+/// This is a convenience enum that can be used for general workflows where the
+/// distinction between BQ and VBQ readers is not important.
+///
+/// For more specialized workflows see [`bq::MmapReader`] and [`vbq::MmapReader`].
+pub enum BinseqReader {
+    Bq(bq::MmapReader),
+    Vbq(vbq::MmapReader),
+}
+impl BinseqReader {
+    pub fn new(path: &str) -> Result<Self> {
+        if path.ends_with(".bq") {
+            Ok(Self::Bq(bq::MmapReader::new(path)?))
+        } else if path.ends_with(".vbq") {
+            Ok(Self::Vbq(vbq::MmapReader::new(path)?))
+        } else {
+            return Err(ExtensionError::UnsupportedExtension(path.to_string()).into());
+        }
+    }
+}
+impl ParallelReader for BinseqReader {
+    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+    ) -> Result<()> {
+        match self {
+            Self::Bq(reader) => reader.process_parallel(processor, num_threads),
+            Self::Vbq(reader) => reader.process_parallel(processor, num_threads),
+        }
+    }
+}
+
+/// Trait for BINSEQ readers that can process records in parallel
+pub trait ParallelReader {
+    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+    ) -> Result<()>;
+}
 
 /// Trait for types that can process records in parallel
 pub trait ParallelProcessor: Send + Clone {
