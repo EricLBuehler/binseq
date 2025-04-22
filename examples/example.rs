@@ -3,8 +3,7 @@ use std::io::{stdout, BufWriter, Write};
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{bq, vbq};
-use binseq::{BinseqRecord, ParallelProcessor};
+use binseq::{BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
 use parking_lot::Mutex;
 
 /// A struct for decoding BINSEQ data back to FASTQ format.
@@ -141,17 +140,11 @@ fn main() -> Result<()> {
         .unwrap_or("./data/subset.bq".to_string());
     let n_threads = std::env::args().nth(2).unwrap_or("1".to_string()).parse()?;
 
+    let reader = BinseqReader::new(&file)?;
     let writer = match_output(None)?;
     let proc = Decoder::new(writer);
 
-    if file.ends_with(".bq") {
-        let reader = bq::MmapReader::new(&file)?;
-        reader.process_parallel(proc.clone(), n_threads)?;
-    } else if file.ends_with(".vbq") {
-        let reader = vbq::MmapReader::new(&file)?;
-        reader.process_parallel(proc.clone(), n_threads)?;
-    }
-
+    reader.process_parallel(proc.clone(), n_threads)?;
     eprintln!("Read {} records", proc.num_records());
 
     Ok(())

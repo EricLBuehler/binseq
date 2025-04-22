@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::{bq, BinseqRecord, ParallelProcessor};
+use binseq::{bq, BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
 use nucgen::Sequence;
 
 #[derive(Clone, Default)]
@@ -43,7 +43,7 @@ impl ParallelProcessor for MyProcessor {
 }
 
 fn mmap_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
-    let reader = bq::MmapReader::new(binseq_path)?;
+    let reader = BinseqReader::new(binseq_path)?;
     let proc = MyProcessor::default();
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
