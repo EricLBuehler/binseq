@@ -20,6 +20,13 @@ impl BinseqReader {
             return Err(ExtensionError::UnsupportedExtension(path.to_string()).into());
         }
     }
+
+    pub fn is_paired(&self) -> bool {
+        match self {
+            Self::Bq(reader) => reader.is_paired(),
+            Self::Vbq(reader) => reader.is_paired(),
+        }
+    }
 }
 impl ParallelReader for BinseqReader {
     fn process_parallel<P: ParallelProcessor + Clone + 'static>(

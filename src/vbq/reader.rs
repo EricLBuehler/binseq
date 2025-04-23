@@ -679,6 +679,11 @@ impl MmapReader {
         self.header
     }
 
+    /// Checks if the file contains paired records
+    pub fn is_paired(&self) -> bool {
+        self.header.is_paired()
+    }
+
     /// Fills an existing RecordBlock with the next block of records from the file
     ///
     /// This method reads the next block of records from the current position in the file

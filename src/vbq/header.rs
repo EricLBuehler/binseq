@@ -271,6 +271,10 @@ impl VBinseqHeader {
         reader.read_exact(&mut buffer)?;
         Self::from_bytes(&buffer)
     }
+
+    pub fn is_paired(&self) -> bool {
+        self.paired
+    }
 }
 
 /// Block header for VBINSEQ block data

@@ -105,6 +105,11 @@ impl BinseqHeader {
         }
     }
 
+    /// Checks if the file is paired
+    pub fn is_paired(&self) -> bool {
+        self.xlen > 0
+    }
+
     /// Parses a header from a fixed-size byte array
     ///
     /// This method validates the magic number and format version before constructing

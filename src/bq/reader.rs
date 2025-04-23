@@ -297,6 +297,11 @@ impl MmapReader {
         self.header
     }
 
+    /// Checks if the file has paired-records
+    pub fn is_paired(&self) -> bool {
+        self.header.is_paired()
+    }
+
     /// Returns a reference to a specific record
     ///
     /// # Arguments
