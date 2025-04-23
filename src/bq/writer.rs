@@ -12,7 +12,11 @@ use std::io::Write;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{rngs::SmallRng, SeedableRng};
 
-use crate::{error::WriteError, BinseqHeader, Policy, Result, RNG_SEED};
+use super::BinseqHeader;
+use crate::{
+    error::{Result, WriteError},
+    Policy, RNG_SEED,
+};
 
 /// Writes a single flag value to a writer in little-endian format
 ///
@@ -77,8 +81,8 @@ pub struct Encoder {
     /// Policy for handling invalid nucleotides during encoding
     policy: Policy,
 
-    /// Random number generator for the RandomDraw policy
-    /// Seeded with RNG_SEED for reproducibility
+    /// Random number generator for the `RandomDraw` policy
+    /// Seeded with `RNG_SEED` for reproducibility
     rng: SmallRng,
 }
 impl Encoder {
@@ -91,10 +95,11 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, Encoder};
+    /// # use binseq::bq::{BinseqHeader, Encoder};
     /// let header = BinseqHeader::new(100); // For sequences of length 100
     /// let encoder = Encoder::new(header);
     /// ```
+    #[must_use]
     pub fn new(header: BinseqHeader) -> Self {
         Self::with_policy(header, Policy::default())
     }
@@ -109,10 +114,12 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, Encoder, Policy};
+    /// # use binseq::bq::{BinseqHeader, Encoder};
+    /// # use binseq::Policy;
     /// let header = BinseqHeader::new(100);
     /// let encoder = Encoder::with_policy(header, Policy::SetToA);
     /// ```
+    #[must_use]
     pub fn with_policy(header: BinseqHeader, policy: Policy) -> Self {
         Self {
             header,
@@ -217,7 +224,8 @@ impl Encoder {
 /// # Examples
 ///
 /// ```
-/// # use binseq::{BinseqHeader, BinseqWriterBuilder, Policy, Result};
+/// # use binseq::{Policy, Result};
+/// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
 /// # fn main() -> Result<()> {
 /// let header = BinseqHeader::new(100);
 /// let writer = BinseqWriterBuilder::default()
@@ -238,16 +246,19 @@ pub struct BinseqWriterBuilder {
     headless: Option<bool>,
 }
 impl BinseqWriterBuilder {
+    #[must_use]
     pub fn header(mut self, header: BinseqHeader) -> Self {
         self.header = Some(header);
         self
     }
 
+    #[must_use]
     pub fn policy(mut self, policy: Policy) -> Self {
         self.policy = Some(policy);
         self
     }
 
+    #[must_use]
     pub fn headless(mut self, headless: bool) -> Self {
         self.headless = Some(headless);
         self
@@ -312,7 +323,8 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, BinseqWriter, Policy, Result};
+    /// # use binseq::bq::{BinseqHeader, BinseqWriter};
+    /// # use binseq::{Result, Policy};
     /// # fn main() -> Result<()> {
     /// let header = BinseqHeader::new(100);
     /// let writer = BinseqWriter::new(
@@ -408,7 +420,8 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::{BinseqHeader, BinseqWriterBuilder, Result};
+    /// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+    /// # use binseq::Result;
     /// # fn main() -> Result<()> {
     /// let header = BinseqHeader::new(100);
     /// let writer = BinseqWriterBuilder::default()
@@ -499,7 +512,7 @@ mod testing {
     use std::{fs::File, io::BufWriter};
 
     use super::*;
-    use crate::SIZE_HEADER;
+    use crate::bq::SIZE_HEADER;
 
     #[test]
     fn test_headless() -> Result<()> {

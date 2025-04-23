@@ -7,11 +7,12 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 
-use crate::{error::Result, HeaderError};
+use crate::error::{HeaderError, Result};
 
 /// Current magic number: "BSEQ" in ASCII (in little-endian byte order)
 ///
 /// This is used to identify binary sequence files and verify file integrity.
+#[allow(clippy::unreadable_literal)]
 const MAGIC: u32 = 0x51455342;
 
 /// Current format version of the binary sequence file format
@@ -72,6 +73,7 @@ impl BinseqHeader {
     /// # Returns
     ///
     /// A new `BinseqHeader` instance
+    #[must_use]
     pub fn new(slen: u32) -> Self {
         Self {
             magic: MAGIC,
@@ -95,6 +97,7 @@ impl BinseqHeader {
     /// # Returns
     ///
     /// A new `BinseqHeader` instance with extended sequence information
+    #[must_use]
     pub fn new_extended(slen: u32, xlen: u32) -> Self {
         Self {
             magic: MAGIC,
@@ -103,6 +106,12 @@ impl BinseqHeader {
             xlen,
             reserved: [42; 19],
         }
+    }
+
+    /// Checks if the file is paired
+    #[must_use]
+    pub fn is_paired(&self) -> bool {
+        self.xlen > 0
     }
 
     /// Parses a header from a fixed-size byte array
@@ -136,9 +145,8 @@ impl BinseqHeader {
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
-        let reserved = match buffer[13..32].try_into() {
-            Ok(reserved) => reserved,
-            Err(_) => return Err(HeaderError::InvalidReservedBytes.into()),
+        let Ok(reserved) = buffer[13..32].try_into() else {
+            return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
             magic,

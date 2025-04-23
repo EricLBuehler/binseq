@@ -16,8 +16,15 @@ jobs:
         run: cargo test --verbose
       - name: Run tests (release)
         run: cargo test --verbose --release
+
+  fmt_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
       - name: Formatting
         run: cargo fmt --check
+      - name: Linting
+        run: cargo clippy --verbose
 
   example_read_write:
     runs-on: ubuntu-latest
@@ -39,3 +46,12 @@ jobs:
       - uses: actions/checkout@v3
       - name: run example
         run: cargo run --release --example example
+
+  example_grep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: run example bq
+        run: cargo run --release --example grep ./data/subset.bq
+      - name: run example vbq
+        run: cargo run --release --example grep ./data/subset.vbq
