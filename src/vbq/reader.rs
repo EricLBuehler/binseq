@@ -510,27 +510,40 @@ impl BinseqRecord for RefRecord<'_> {
 
 /// Memory-mapped reader for VBINSEQ files
 ///
-/// `MmapReader` provides efficient, memory-mapped access to VBINSEQ files. It allows
+/// [`MmapReader`] provides efficient, memory-mapped access to VBINSEQ files. It allows
 /// sequential reading of record blocks and supports parallel processing of records.
 ///
 /// Memory mapping allows the operating system to lazily load file contents as needed,
 /// which can be more efficient than standard file I/O, especially for large files.
 ///
+/// The [`MmapReader`] is designed to be used in a multi-threaded environment, and it
+/// is built around [`RecordBlock`]s which are the units of data in a VBINSEQ file.
+/// Each one would be held by a separate thread and would load data from the shared
+/// [`MmapReader`] through the [`MmapReader::read_block_into`] method. However, they can
+/// also be used in a single-threaded environment for sequential processing.
+///
+/// Each [`RecordBlock`] contains a [`BlockHeader`] and is used to access [`RefRecord`]s
+/// which implement the [`BinseqRecord`] trait.
+///
 /// # Examples
 ///
-/// ```rust,no_run
+/// ```
 /// use binseq::vbq::MmapReader;
+/// use binseq::Result;
 ///
-/// // Open a VBINSEQ file
-/// let mut reader = MmapReader::new("example.vbq").unwrap();
+/// fn main() -> Result<()> {
+///     let path = "./data/subset.vbq";
+///     let mut reader = MmapReader::new(path)?;
 ///
-/// // Create a block to hold records
-/// let mut block = reader.new_block();
+///     // Create a block to hold records
+///     let mut block = reader.new_block();
 ///
-/// // Read blocks sequentially
-/// while reader.read_block_into(&mut block).unwrap() {
-///     println!("Read a block with {} records", block.n_records());
-///     // Process records...
+///     // Read blocks sequentially
+///     while reader.read_block_into(&mut block)? {
+///         println!("Read a block with {} records", block.n_records());
+///         // Process records...
+///     }
+///     Ok(())
 /// }
 /// ```
 pub struct MmapReader {
