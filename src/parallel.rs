@@ -35,6 +35,9 @@ impl ParallelReader for BinseqReader {
 }
 
 /// Trait for BINSEQ readers that can process records in parallel
+///
+/// This is implemented by the **reader** not by the **processor**.
+/// For the **processor**, see the [`ParallelProcessor`] trait.
 pub trait ParallelReader {
     fn process_parallel<P: ParallelProcessor + Clone + 'static>(
         self,
@@ -43,7 +46,10 @@ pub trait ParallelReader {
     ) -> Result<()>;
 }
 
-/// Trait for types that can process records in parallel
+/// Trait for types that can process records in parallel.
+///
+/// This is implemented by the **processor** not by the **reader**.
+/// For the **reader**, see the [`ParallelReader`] trait.
 pub trait ParallelProcessor: Send + Clone {
     /// Process a single record
     fn process_record<R: BinseqRecord>(&mut self, record: R) -> Result<()>;
