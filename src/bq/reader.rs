@@ -15,9 +15,11 @@ use std::sync::Arc;
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
-use crate::error::{Error, ReadError, Result};
-use crate::header::{BinseqHeader, SIZE_HEADER};
-use crate::ParallelProcessor;
+use super::header::{BinseqHeader, SIZE_HEADER};
+use crate::{
+    error::{ReadError, Result},
+    BinseqRecord, Error, ParallelProcessor, ParallelReader,
+};
 
 /// A reference to a binary sequence record in a memory-mapped file
 ///
@@ -32,7 +34,7 @@ use crate::ParallelProcessor;
 #[derive(Clone, Copy)]
 pub struct RefRecord<'a> {
     /// The position (index) of this record in the file (0-based record index, not byte offset)
-    id: usize,
+    id: u64,
     /// The underlying u64 buffer representing the record's binary data
     buffer: &'a [u64],
     /// The configuration that defines the layout and size of record components
@@ -50,83 +52,38 @@ impl<'a> RefRecord<'a> {
     /// # Panics
     ///
     /// Panics if the buffer length doesn't match the expected size from the config
-    pub fn new(id: usize, buffer: &'a [u64], config: RecordConfig) -> Self {
+    #[must_use]
+    pub fn new(id: u64, buffer: &'a [u64], config: RecordConfig) -> Self {
         assert_eq!(buffer.len(), config.record_size_u64());
         Self { id, buffer, config }
     }
-    /// Returns the record's position (index) in the file
-    pub fn id(&self) -> usize {
-        self.id
-    }
-
-    /// Returns the record's flag value
-    ///
-    /// The flag is stored in the first u64 of the record and can contain
-    /// various metadata about the sequence.
-    pub fn flag(&self) -> u64 {
-        self.buffer[0]
-    }
-
-    /// Returns a reference to the primary sequence data buffer
-    ///
-    /// The returned slice contains the compressed nucleotide sequence,
-    /// where each u64 stores up to 32 nucleotides.
-    pub fn sbuf(&self) -> &[u64] {
-        &self.buffer[1..1 + self.config.schunk]
-    }
-
-    /// Returns a reference to the extended sequence data buffer
-    ///
-    /// The returned slice contains the compressed extended data (e.g., quality scores),
-    /// where each u64 stores 32 values.
-    pub fn xbuf(&self) -> &[u64] {
-        &self.buffer[1 + self.config.schunk..]
-    }
-    /// Decodes the primary sequence into a byte buffer
-    ///
-    /// This method decompresses the binary sequence data into standard nucleotide
-    /// representation (A, C, G, T).
-    ///
-    /// # Arguments
-    ///
-    /// * `dbuf` - The buffer to store the decoded sequence
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the decoding process fails
-    pub fn decode_s(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.sbuf(), self.config.slen, dbuf)?;
-        Ok(())
-    }
-
-    /// Decodes the extended sequence data into a byte buffer
-    ///
-    /// This method decompresses the binary extended data (e.g., quality scores)
-    /// into its original representation.
-    ///
-    /// # Arguments
-    ///
-    /// * `dbuf` - The buffer to store the decoded data
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the decoding process fails
-    pub fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf(), self.config.xlen, dbuf)?;
-        Ok(())
-    }
-    /// Returns whether this record contains extended sequence data
-    ///
-    /// A record is considered paired if it has a non-zero extended sequence length.
-    pub fn paired(&self) -> bool {
-        self.config.paired()
-    }
-
     /// Returns the record's configuration
     ///
     /// The configuration defines the layout and size of the record's components.
+    #[must_use]
     pub fn config(&self) -> RecordConfig {
         self.config
+    }
+}
+
+impl BinseqRecord for RefRecord<'_> {
+    fn index(&self) -> u64 {
+        self.id
+    }
+    fn flag(&self) -> u64 {
+        self.buffer[0]
+    }
+    fn slen(&self) -> u64 {
+        self.config.slen
+    }
+    fn xlen(&self) -> u64 {
+        self.config.xlen
+    }
+    fn sbuf(&self) -> &[u64] {
+        &self.buffer[1..=(self.config.schunk as usize)]
+    }
+    fn xbuf(&self) -> &[u64] {
+        &self.buffer[1 + self.config.schunk as usize..]
     }
 }
 
@@ -139,15 +96,15 @@ impl<'a> RefRecord<'a> {
 #[derive(Clone, Copy)]
 pub struct RecordConfig {
     /// The primary sequence length in base pairs
-    slen: usize,
+    slen: u64,
     /// The extended sequence length in base pairs
-    xlen: usize,
+    xlen: u64,
     /// The number of u64 chunks needed to store the primary sequence
     /// (each u64 stores 32 nucleotides)
-    schunk: usize,
+    schunk: u64,
     /// The number of u64 chunks needed to store the extended sequence
     /// (each u64 stores 32 values)
-    xchunk: usize,
+    xchunk: u64,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -165,10 +122,10 @@ impl RecordConfig {
     /// A new `RecordConfig` instance with the specified sequence lengths
     pub fn new(slen: usize, xlen: usize) -> Self {
         Self {
-            slen,
-            xlen,
-            schunk: slen.div_ceil(32),
-            xchunk: xlen.div_ceil(32),
+            slen: slen as u64,
+            xlen: xlen as u64,
+            schunk: (slen as u64).div_ceil(32),
+            xchunk: (xlen as u64).div_ceil(32),
         }
     }
 
@@ -199,14 +156,14 @@ impl RecordConfig {
     ///
     /// This method returns the length of the primary sequence in base pairs.
     pub fn slen(&self) -> usize {
-        self.slen
+        self.slen as usize
     }
 
     /// Returns the extended sequence length in base pairs
     ///
     /// This method returns the length of the extended sequence in base pairs.
     pub fn xlen(&self) -> usize {
-        self.xlen
+        self.xlen as usize
     }
 
     /// Returns the number of u64 chunks needed to store the primary sequence
@@ -214,7 +171,7 @@ impl RecordConfig {
     /// This method returns the number of u64 chunks required to store the primary
     /// sequence, where each u64 stores 32 nucleotides.
     pub fn schunk(&self) -> usize {
-        self.schunk
+        self.schunk as usize
     }
 
     /// Returns the number of u64 chunks needed to store the extended sequence
@@ -222,7 +179,7 @@ impl RecordConfig {
     /// This method returns the number of u64 chunks required to store the extended
     /// sequence, where each u64 stores 32 values.
     pub fn xchunk(&self) -> usize {
-        self.xchunk
+        self.xchunk as usize
     }
 
     /// Returns the full record size in bytes (u8):
@@ -234,7 +191,7 @@ impl RecordConfig {
     /// Returns the full record size in u64
     /// schunk + xchunk + 1 (flag)
     pub fn record_size_u64(&self) -> usize {
-        self.schunk + self.xchunk + 1
+        (self.schunk + self.xchunk + 1) as usize
     }
 }
 
@@ -247,6 +204,29 @@ impl RecordConfig {
 ///
 /// The reader ensures thread-safety through the use of `Arc` for sharing the
 /// memory-mapped data between threads.
+///
+/// Records are returned as [`RefRecord`] which implement the [`BinseqRecord`] trait.
+///
+/// # Examples
+///
+/// ```
+/// use binseq::bq::MmapReader;
+/// use binseq::Result;
+///
+/// fn main() -> Result<()> {
+///     let path = "./data/subset.bq";
+///     let reader = MmapReader::new(path)?;
+///
+///     // Calculate the number of records in the file
+///     let num_records = reader.num_records();
+///     println!("Number of records: {}", num_records);
+///
+///     // Get the record at index 20 (0-indexed)
+///     let record = reader.get(20)?;
+///
+///     Ok(())
+/// }
+/// ```
 pub struct MmapReader {
     /// Memory mapped file contents, wrapped in Arc for thread-safe sharing
     mmap: Arc<Mmap>,
@@ -312,6 +292,7 @@ impl MmapReader {
     ///
     /// This is calculated by subtracting the header size from the total file size
     /// and dividing by the size of each record.
+    #[must_use]
     pub fn num_records(&self) -> usize {
         (self.mmap.len() - SIZE_HEADER) / self.config.record_size_bytes()
     }
@@ -319,8 +300,15 @@ impl MmapReader {
     /// Returns a copy of the binary sequence file header
     ///
     /// The header contains format information and sequence length specifications.
+    #[must_use]
     pub fn header(&self) -> BinseqHeader {
         self.header
+    }
+
+    /// Checks if the file has paired-records
+    #[must_use]
+    pub fn is_paired(&self) -> bool {
+        self.header.is_paired()
     }
 
     /// Returns a reference to a specific record
@@ -345,7 +333,7 @@ impl MmapReader {
         let rbound = lbound + self.config.record_size_bytes();
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
-        Ok(RefRecord::new(idx, buffer, self.config))
+        Ok(RefRecord::new(idx as u64, buffer, self.config))
     }
 }
 
@@ -362,19 +350,19 @@ impl MmapReader {
 pub struct StreamReader<R: Read> {
     /// The source reader for binary sequence data
     reader: R,
-    
+
     /// Binary sequence file header containing format information
     header: Option<BinseqHeader>,
-    
+
     /// Configuration defining the layout of records in the file
     config: Option<RecordConfig>,
-    
+
     /// Buffer for storing incoming data
     buffer: Vec<u8>,
-    
+
     /// Current position in the buffer
     buffer_pos: usize,
-    
+
     /// Length of valid data in the buffer
     buffer_len: usize,
 }
@@ -395,7 +383,7 @@ impl<R: Read> StreamReader<R> {
     pub fn new(reader: R) -> Self {
         Self::with_capacity(reader, 8192)
     }
-    
+
     /// Creates a new StreamReader with a specified buffer capacity
     ///
     /// This constructor initializes a StreamReader with a custom buffer size,
@@ -420,7 +408,7 @@ impl<R: Read> StreamReader<R> {
             // buffer_capacity: capacity,
         }
     }
-    
+
     /// Reads and validates the header from the underlying reader
     ///
     /// This method reads the binary sequence file header and validates it.
@@ -441,23 +429,23 @@ impl<R: Read> StreamReader<R> {
         if self.header.is_some() {
             return Ok(self.header.as_ref().unwrap());
         }
-        
+
         // Ensure we have enough data for the header
         while self.buffer_len - self.buffer_pos < SIZE_HEADER {
             self.fill_buffer()?;
         }
-        
+
         // Parse header
         let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
         let header = BinseqHeader::from_buffer(header_slice)?;
-        
+
         self.header = Some(header);
         self.config = Some(RecordConfig::from_header(&header));
         self.buffer_pos += SIZE_HEADER;
-        
+
         Ok(self.header.as_ref().unwrap())
     }
-    
+
     /// Fills the internal buffer with more data from the reader
     ///
     /// This method reads more data from the underlying reader, handling
@@ -483,17 +471,17 @@ impl<R: Read> StreamReader<R> {
             self.buffer_len = 0;
             self.buffer_pos = 0;
         }
-        
+
         // Read more data
         let bytes_read = self.reader.read(&mut self.buffer[self.buffer_len..])?;
         if bytes_read == 0 {
             return Err(ReadError::EndOfStream.into());
         }
-        
+
         self.buffer_len += bytes_read;
         Ok(())
     }
-    
+
     /// Retrieves the next record from the stream
     ///
     /// This method reads and processes the next complete record from the stream.
@@ -516,10 +504,10 @@ impl<R: Read> StreamReader<R> {
         if self.header.is_none() {
             self.read_header()?;
         }
-        
+
         let config = self.config.unwrap();
         let record_size = config.record_size_bytes();
-        
+
         // Ensure we have enough data for a complete record
         while self.buffer_len - self.buffer_pos < record_size {
             match self.fill_buffer() {
@@ -527,26 +515,28 @@ impl<R: Read> StreamReader<R> {
                 Err(Error::ReadError(ReadError::EndOfStream)) => {
                     // End of stream reached - if we have any partial data, it's an error
                     if self.buffer_len - self.buffer_pos > 0 {
-                        return Err(ReadError::PartialRecord(self.buffer_len - self.buffer_pos).into());
+                        return Err(
+                            ReadError::PartialRecord(self.buffer_len - self.buffer_pos).into()
+                        );
                     }
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
             }
         }
-        
+
         // Process record
         let record_start = self.buffer_pos;
         self.buffer_pos += record_size;
-        
+
         let record_bytes = &self.buffer[record_start..record_start + record_size];
         let record_u64s = cast_slice(record_bytes);
-        
+
         // Create record with incremental ID (based on read position)
         let id = (record_start - SIZE_HEADER) / record_size;
-        Ok(Some(RefRecord::new(id, record_u64s, config)))
+        Ok(Some(RefRecord::new(id as u64, record_u64s, config)))
     }
-    
+
     /// Consumes the stream reader and returns the inner reader
     ///
     /// This method is useful when you need access to the underlying reader
@@ -567,7 +557,7 @@ impl<R: Read> StreamReader<R> {
 pub const BATCH_SIZE: usize = 1024;
 
 /// Parallel processing implementation for memory-mapped readers
-impl MmapReader {
+impl ParallelReader for MmapReader {
     /// Processes all records in parallel using multiple threads
     ///
     /// This method distributes the records across the specified number of threads
@@ -587,7 +577,7 @@ impl MmapReader {
     ///
     /// * `Ok(())` - If all records were processed successfully
     /// * `Err(Error)` - If an error occurred during processing
-    pub fn process_parallel<P: ParallelProcessor + Clone + 'static>(
+    fn process_parallel<P: ParallelProcessor + Clone + 'static>(
         self,
         processor: P,
         num_threads: usize,

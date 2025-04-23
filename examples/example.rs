@@ -3,7 +3,7 @@ use std::io::{stdout, BufWriter, Write};
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{MmapReader, ParallelProcessor, RefRecord};
+use binseq::{BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
 use parking_lot::Mutex;
 
 /// A struct for decoding BINSEQ data back to FASTQ format.
@@ -28,6 +28,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    #[must_use]
     pub fn new(writer: Box<dyn Write + Send>) -> Self {
         let global_buffer = Arc::new(Mutex::new(writer));
         Decoder {
@@ -42,50 +43,51 @@ impl Decoder {
         }
     }
 
+    #[must_use]
     pub fn num_records(&self) -> usize {
         *self.num_records.lock()
     }
 }
 impl ParallelProcessor for Decoder {
-    fn process_record(&mut self, record: RefRecord) -> Result<(), binseq::Error> {
+    fn process_record<R: BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
         // clear decoding buffers
         self.sbuf.clear();
         self.xbuf.clear();
 
         // decode index
-        let index = self.ibuf.format(record.id()).as_bytes();
+        let index = self.ibuf.format(record.index()).as_bytes();
 
         // write primary fastq to local buffer
         record.decode_s(&mut self.sbuf)?;
         if self.quality.len() < self.sbuf.len() {
             self.quality.resize(self.sbuf.len(), b'?');
         }
-        write_fastq_parts(
-            &mut self.buffer,
-            index,
-            &self.sbuf,
-            &self.quality[..self.sbuf.len()],
-        )?;
+        let squal = if record.has_quality() {
+            record.squal()
+        } else {
+            &self.quality[..self.sbuf.len()]
+        };
+        write_fastq_parts(&mut self.buffer, index, &self.sbuf, squal)?;
 
         // write extended fastq to local buffer
-        if record.paired() {
+        if record.is_paired() {
             record.decode_x(&mut self.xbuf)?;
             if self.quality.len() < self.xbuf.len() {
                 self.quality.resize(self.xbuf.len(), b'?');
             }
-            write_fastq_parts(
-                &mut self.buffer,
-                index,
-                &self.xbuf,
-                &self.quality[..self.xbuf.len()],
-            )?;
+            let xqual = if record.has_quality() {
+                record.xqual()
+            } else {
+                &self.quality[..self.xbuf.len()]
+            };
+            write_fastq_parts(&mut self.buffer, index, &self.xbuf, xqual)?;
         }
 
         self.local_count += 1;
         Ok(())
     }
 
-    fn on_batch_complete(&mut self) -> Result<(), binseq::Error> {
+    fn on_batch_complete(&mut self) -> binseq::Result<()> {
         // Lock the mutex to write to the global buffer
         {
             let mut lock = self.global_buffer.lock();
@@ -105,6 +107,7 @@ impl ParallelProcessor for Decoder {
     }
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub fn write_fastq_parts<W: Write>(
     writer: &mut W,
     index: &[u8],
@@ -122,15 +125,12 @@ pub fn write_fastq_parts<W: Write>(
 }
 
 fn match_output(path: Option<&str>) -> Result<Box<dyn Write + Send>> {
-    match path {
-        Some(path) => {
-            let writer = File::create(path).map(BufWriter::new)?;
-            Ok(Box::new(writer))
-        }
-        None => {
-            let stdout = stdout();
-            Ok(Box::new(BufWriter::new(stdout)))
-        }
+    if let Some(path) = path {
+        let writer = File::create(path).map(BufWriter::new)?;
+        Ok(Box::new(writer))
+    } else {
+        let stdout = stdout();
+        Ok(Box::new(BufWriter::new(stdout)))
     }
 }
 
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         .unwrap_or("./data/subset.bq".to_string());
     let n_threads = std::env::args().nth(2).unwrap_or("1".to_string()).parse()?;
 
-    let reader = MmapReader::new(&file)?;
+    let reader = BinseqReader::new(&file)?;
     let writer = match_output(None)?;
     let proc = Decoder::new(writer);
 

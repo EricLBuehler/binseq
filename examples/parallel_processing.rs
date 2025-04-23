@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::*;
+use binseq::{bq, BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
 use nucgen::Sequence;
 
 #[derive(Clone, Default)]
@@ -19,22 +19,23 @@ pub struct MyProcessor {
     xbuf: Vec<u8>,
 }
 impl MyProcessor {
+    #[must_use]
     pub fn counter(&self) -> usize {
         self.counter.load(Ordering::Relaxed)
     }
 }
 impl ParallelProcessor for MyProcessor {
-    fn process_record(&mut self, record: RefRecord) -> Result<(), binseq::Error> {
+    fn process_record<R: BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
         self.sbuf.clear();
         self.xbuf.clear();
         record.decode_s(&mut self.sbuf)?;
-        if record.paired() {
+        if record.is_paired() {
             record.decode_x(&mut self.xbuf)?;
         }
         self.local_counter += 1;
         Ok(())
     }
-    fn on_batch_complete(&mut self) -> Result<(), binseq::Error> {
+    fn on_batch_complete(&mut self) -> binseq::Result<()> {
         self.counter
             .fetch_add(self.local_counter, Ordering::Relaxed);
         self.local_counter = 0;
@@ -43,7 +44,7 @@ impl ParallelProcessor for MyProcessor {
 }
 
 fn mmap_processing(binseq_path: &str, n_threads: usize) -> Result<()> {
-    let reader = MmapReader::new(binseq_path)?;
+    let reader = BinseqReader::new(binseq_path)?;
     let proc = MyProcessor::default();
     reader.process_parallel(proc.clone(), n_threads)?;
     Ok(())
@@ -81,7 +82,7 @@ pub fn main() -> Result<()> {
                 mmap_processing(binseq_path_single, n_threads)?;
                 Ok(())
             },
-            &format!("single - mmap_parallel_processing ({})", n_threads),
+            &format!("single - mmap_parallel_processing ({n_threads})"),
         );
     }
     for n_threads in 1..=16 {
@@ -93,7 +94,7 @@ pub fn main() -> Result<()> {
                 mmap_processing(binseq_path_paired, n_threads)?;
                 Ok(())
             },
-            &format!("paired - mmap_parallel_processing ({})", n_threads),
+            &format!("paired - mmap_parallel_processing ({n_threads})"),
         );
     }
 
@@ -107,20 +108,20 @@ where
     let now = std::time::Instant::now();
     f().unwrap();
     let elapsed = now.elapsed();
-    eprintln!("Elapsed time ({}): {:?}", name, elapsed);
+    eprintln!("Elapsed time ({name}): {elapsed:?}");
 }
 
 fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()> {
     // Open the output file
-    let header = BinseqHeader::new(seq_size as u32);
+    let header = bq::BinseqHeader::new(seq_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriterBuilder::default()
+    let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)
         .build(out_handle)?;
 
     // Write the binary sequence
     let mut sequence = Sequence::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _ in 0..num_seq {
         sequence.fill_buffer(&mut rng, seq_size);
         if !writer.write_nucleotides(0, sequence.bytes())? {
@@ -128,25 +129,22 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
         }
     }
     writer.flush()?;
-    eprintln!(
-        "Finished writing {} records to path: {}",
-        num_seq, binseq_path
-    );
+    eprintln!("Finished writing {num_seq} records to path: {binseq_path}");
     Ok(())
 }
 
 fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usize) -> Result<()> {
     // Open the output file
-    let header = BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
+    let header = bq::BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
-    let mut writer = BinseqWriterBuilder::default()
+    let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)
         .build(out_handle)?;
 
     // Write the binary sequence
     let mut r1 = Sequence::new();
     let mut r2 = Sequence::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _ in 0..num_seq {
         r1.fill_buffer(&mut rng, r1_size);
         r2.fill_buffer(&mut rng, r2_size);
@@ -156,9 +154,6 @@ fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usiz
         }
     }
     writer.flush()?;
-    eprintln!(
-        "Finished writing {} records to path: {}",
-        num_seq, binseq_path
-    );
+    eprintln!("Finished writing {num_seq} records to path: {binseq_path}");
     Ok(())
 }

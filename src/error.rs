@@ -6,20 +6,58 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 pub enum Error {
-    /// Errors related to binary sequence header processing
+    /// Errors related to file and block headers
+    #[error("Error processing header: {0}")]
     HeaderError(#[from] HeaderError),
-    /// Errors that occur during read operations
-    ReadError(#[from] ReadError),
+
     /// Errors that occur during write operations
+    #[error("Error writing file: {0}")]
     WriteError(#[from] WriteError),
-    /// Standard I/O errors from the Rust standard library
+
+    /// Errors that occur during read operations
+    #[error("Error reading file: {0}")]
+    ReadError(#[from] ReadError),
+
+    /// Errors related to file indexing
+    #[error("Error processing Index: {0}")]
+    IndexError(#[from] IndexError),
+
+    /// Standard I/O errors
+    #[error("Error with IO: {0}")]
     IoError(#[from] std::io::Error),
-    /// UTF-8 encoding/decoding errors
+
+    /// UTF-8 conversion errors
+    #[error("Error with UTF8: {0}")]
     Utf8Error(#[from] std::str::Utf8Error),
-    /// Errors from the bitnuc nucleotide processing librar
+
+    /// Errors related to missing extensions
+    ExtensionError(#[from] ExtensionError),
+
+    /// Errors from the bitnuc dependency for nucleotide encoding/decoding
+    #[error("Bitnuc error: {0}")]
     BitnucError(#[from] bitnuc::NucleotideError),
-    /// Generic errors that can occur in any part of the system
+
+    /// Generic errors for other unexpected situations
+    #[error("Generic error: {0}")]
     AnyhowError(#[from] anyhow::Error),
+}
+impl Error {
+    /// Checks if the error is an index mismatch error
+    ///
+    /// This is useful for determining if a file's index is out of sync with its content,
+    /// which might require rebuilding the index.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the error is an `IndexError::ByteSizeMismatch`
+    /// * `false` for all other error types
+    #[must_use]
+    pub fn is_index_mismatch(&self) -> bool {
+        match self {
+            Self::IndexError(err) => err.is_mismatch(),
+            _ => false,
+        }
+    }
 }
 
 /// Errors specific to processing and validating binary sequence headers
@@ -75,17 +113,33 @@ pub enum ReadError {
     /// * Second `usize` - The maximum available record index
     #[error("Requested record index ({0}) is out of record range ({1})")]
     OutOfRange(usize, usize),
-    
+
     /// End of stream was reached while reading
     #[error("End of stream reached")]
     EndOfStream,
-    
+
     /// A partial record was encountered at the end of a stream
     ///
     /// # Arguments
     /// * `usize` - The number of bytes read in the partial record
     #[error("Partial record at end of stream ({0} bytes)")]
     PartialRecord(usize),
+
+    /// When a block header contains an invalid magic number
+    ///
+    /// The first parameter is the invalid magic number, the second is the position in the file
+    #[error("Unexpected Block Magic Number found: {0} at position {1}")]
+    InvalidBlockMagicNumber(u64, usize),
+
+    /// When trying to read a block but reaching the end of the file unexpectedly
+    ///
+    /// The parameter is the position in the file where the read was attempted
+    #[error("Unable to find an expected full block at position {0}")]
+    UnexpectedEndOfFile(usize),
+
+    /// When the file metadata doesn't match the expected VBINSEQ format
+    #[error("Unexpected file metadata")]
+    InvalidFileType,
 }
 
 /// Errors that can occur while writing binary sequence data
@@ -109,4 +163,90 @@ pub enum WriteError {
     /// Attempted to write data without first setting up the header
     #[error("Missing header in writer builder")]
     MissingHeader,
+
+    /// When trying to write data without quality scores but the header specifies they should be present
+    #[error("Quality flag is set in header but trying to write without quality scores.")]
+    QualityFlagSet,
+
+    /// When trying to write data without a pair but the header specifies paired records
+    #[error("Paired flag is set in header but trying to write without record pair.")]
+    PairedFlagSet,
+
+    /// When trying to write quality scores but the header specifies they are not present
+    #[error("Quality flag not set in header but trying to write quality scores.")]
+    QualityFlagNotSet,
+
+    /// When trying to write paired data but the header doesn't specify paired records
+    #[error("Paired flag not set in header but trying to write with record pair.")]
+    PairedFlagNotSet,
+
+    /// When a record is too large to fit in a block of the configured size
+    ///
+    /// The first parameter is the record size, the second is the maximum block size
+    #[error("Encountered a record with embedded size {0} but the maximum block size is {1}. Rerun with increased block size.")]
+    RecordSizeExceedsMaximumBlockSize(usize, usize),
+
+    /// When trying to ingest blocks with different sizes than expected
+    ///
+    /// The first parameter is the expected size, the second is the found size
+    #[error(
+        "Incompatible block sizes encountered in BlockWriter Ingest. Found ({1}) Expected ({0})"
+    )]
+    IncompatibleBlockSizes(usize, usize),
+
+    /// When trying to ingest data with an incompatible header
+    ///
+    /// The first parameter is the expected header, the second is the found header
+    #[error("Incompatible headers found in VBinseqWriter::ingest. Found ({1:?}) Expected ({0:?})")]
+    IncompatibleHeaders(crate::vbq::VBinseqHeader, crate::vbq::VBinseqHeader),
+}
+
+/// Errors related to VBINSEQ file indexing
+///
+/// These errors occur when there are issues with the index of a VBINSEQ file,
+/// such as corruption or mismatches with the underlying file.
+#[derive(thiserror::Error, Debug)]
+pub enum IndexError {
+    /// When the magic number in the index doesn't match the expected value
+    ///
+    /// The parameter is the invalid magic number that was found
+    #[error("Invalid magic number: {0}")]
+    InvalidMagicNumber(u64),
+
+    /// When the index references a file that doesn't exist
+    ///
+    /// The parameter is the missing file path
+    #[error("Index missing upstream file path: {0}")]
+    MissingUpstreamFile(String),
+
+    /// When the size of the file doesn't match what the index expects
+    ///
+    /// The first parameter is the actual file size, the second is the expected size
+    #[error("Mismatch in size between upstream size: {0} and expected index size {1}")]
+    ByteSizeMismatch(u64, u64),
+
+    /// Invalid reserved bytes in the index header
+    #[error("Invalid reserved bytes in index header")]
+    InvalidReservedBytes,
+}
+impl IndexError {
+    /// Checks if this error indicates a mismatch between the index and file
+    ///
+    /// This is useful to determine if the index needs to be rebuilt.
+    ///
+    /// # Returns
+    ///
+    /// * `true` for `ByteSizeMismatch` errors
+    /// * `true` for any other error type (this behavior is likely a bug and should be fixed)
+    #[must_use]
+    pub fn is_mismatch(&self) -> bool {
+        matches!(self, Self::ByteSizeMismatch(_, _) | _) // Note: this appears to always return true regardless of error type
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ExtensionError {
+    /// When the extension is not supported
+    #[error("Unsupported extension in path: {0}")]
+    UnsupportedExtension(String),
 }

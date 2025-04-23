@@ -4,7 +4,7 @@
 //! calculating file sizes and other utility operations related to
 //! binary sequence files.
 
-use crate::header::SIZE_HEADER;
+use super::header::SIZE_HEADER;
 
 /// Calculates the expected size in bytes of a binary sequence file
 ///
@@ -30,12 +30,13 @@ use crate::header::SIZE_HEADER;
 /// # Examples
 ///
 /// ```
-/// use binseq::expected_file_size;
+/// use binseq::bq::expected_file_size;
 ///
 /// // For 1000 sequences of length 100
 /// let size = expected_file_size(1000, 100);
 /// assert!(size > 0);
 /// ```
+#[must_use]
 pub fn expected_file_size(num_records: usize, seq_len: usize) -> usize {
     // number of u64 chunks in the sequence
     let n_chunks = seq_len.div_ceil(32);
