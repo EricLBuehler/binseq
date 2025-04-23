@@ -2,16 +2,17 @@
 //!
 //! # BINSEQ
 //!
-//! The `binseq` library provides efficient tools for working with the [BINSEQ](https://www.biorxiv.org/content/10.1101/2025.04.08.647863v1) file format family.
+//! The `binseq` library provides efficient APIs for working with the [BINSEQ](https://www.biorxiv.org/content/10.1101/2025.04.08.647863v1) file format family.
 //!
-//! It offers tools to read and write BINSEQ files, providing:
+//! It offers methods to read and write BINSEQ files, providing:
 //!
 //! - Compact 2-bit encoding and decoding of nucleotide sequences through [`bitnuc`](https://docs.rs/bitnuc/latest/bitnuc/)
-//! - Memory-mapped file access for efficient reading
+//! - Memory-mapped file access for efficient reading ([`bq::MmapReader`] and [`vbq::MmapReader`])
 //! - Parallel processing capabilities for arbitrary tasks through the [`ParallelProcessor`] trait.
 //! - Configurable [`Policy`] for handling invalid nucleotides
 //! - Support for both single and paired-end sequences
 //! - Abstract [`BinseqRecord`] trait for representing records from both `.bq` and `.vbq` files.
+//! - Abstract [`BinseqReader`] enum for processing records from both `.bq` and `.vbq` files.
 //!
 //! ## Crate Organization
 //!
@@ -23,22 +24,37 @@
 //! # Example
 //!
 //! ```
-//! use binseq::bq::{BinseqHeader, BinseqWriterBuilder, MmapReader};
-//! use binseq::{Policy, Result};
-//! use std::io::Cursor;
+//! use binseq::{Result, BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
+//!
+//! #[derive(Clone, Default)]
+//! pub struct Processor {
+//!     // Define fields here
+//! }
+//!
+//! impl ParallelProcessor for Processor {
+//!     fn process_record<B: BinseqRecord>(&mut self, record: B) -> Result<()> {
+//!         // Implement per-record logic here
+//!         Ok(())
+//!     }
+//!
+//!     fn on_batch_complete(&mut self) -> Result<()> {
+//!         // Implement per-batch logic here
+//!         Ok(())
+//!     }
+//! }
 //!
 //! fn main() -> Result<()> {
-//!     // Create a writer for sequences of length 100
-//!     let header = BinseqHeader::new(100);
+//!     // provide an input path (*.bq or *.vbq)
+//!     let path = "./data/subset.bq";
 //!
-//!     let mut writer = BinseqWriterBuilder::default()
-//!         .header(header)
-//!         .build(Cursor::new(Vec::new()))?;
+//!     // open a reader
+//!     let reader = BinseqReader::new(path)?;
 //!
-//!     // Write a sequence
-//!     let sequence = b"ACGT".repeat(25); // 100 nucleotides
-//!     writer.write_nucleotides(0, &sequence)?;
+//!     // initialize a processor
+//!     let processor = Processor::default();
 //!
+//!     // process the records in parallel with 8 threads
+//!     reader.process_parallel(processor, 8)?;
 //!     Ok(())
 //! }
 //! ```
