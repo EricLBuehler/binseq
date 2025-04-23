@@ -5,7 +5,7 @@ use std::thread;
 use binseq::bq::{BinseqHeader, StreamReader, StreamWriterBuilder};
 use binseq::{BinseqRecord, Policy, Result};
 
-fn server(header: BinseqHeader, sequence: Vec<u8>) -> Result<()> {
+fn server(header: BinseqHeader, sequence: &[u8]) -> Result<()> {
     // Create a listener on localhost:3000
     let listener = TcpListener::bind("127.0.0.1:3000").expect("Failed to bind to address");
     println!("Server listening on 127.0.0.1:3000");
@@ -25,7 +25,7 @@ fn server(header: BinseqHeader, sequence: Vec<u8>) -> Result<()> {
 
     // Write sequences in a loop
     for i in 0..10 {
-        writer.write_nucleotides(i, &sequence)?;
+        writer.write_nucleotides(i, sequence)?;
         println!("Server: Sent record {i}");
 
         // Simulate delay between records
@@ -76,7 +76,7 @@ fn client() -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() {
     // Create a header for sequences of length 100
     let header = BinseqHeader::new(100);
 
@@ -84,9 +84,8 @@ fn main() -> Result<()> {
     let sequence = b"ACGT".repeat(25); // 100 nucleotides
 
     // Spawn the server in a separate thread
-    let sequence_clone = sequence.clone();
     let server_thread = thread::spawn(move || {
-        if let Err(e) = server(header, sequence_clone) {
+        if let Err(e) = server(header, &sequence) {
             eprintln!("Server error: {e:?}");
         }
     });
@@ -98,6 +97,4 @@ fn main() -> Result<()> {
 
     // Wait for the server to finish
     server_thread.join().unwrap();
-
-    Ok(())
 }
