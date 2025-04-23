@@ -199,6 +199,8 @@ impl RecordConfig {
 /// The reader ensures thread-safety through the use of `Arc` for sharing the
 /// memory-mapped data between threads.
 ///
+/// Records are returned as [`RefRecord`] which implement the [`BinseqRecord`] trait.
+///
 /// # Examples
 ///
 /// ```
