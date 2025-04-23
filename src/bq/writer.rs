@@ -660,25 +660,29 @@ pub struct StreamWriterBuilder {
 
 impl StreamWriterBuilder {
     /// Sets the header for the writer
-    #[must_use] pub fn header(mut self, header: BinseqHeader) -> Self {
+    #[must_use]
+    pub fn header(mut self, header: BinseqHeader) -> Self {
         self.header = Some(header);
         self
     }
 
     /// Sets the policy for handling invalid nucleotides
-    #[must_use] pub fn policy(mut self, policy: Policy) -> Self {
+    #[must_use]
+    pub fn policy(mut self, policy: Policy) -> Self {
         self.policy = Some(policy);
         self
     }
 
     /// Sets headless mode (whether to skip writing the header)
-    #[must_use] pub fn headless(mut self, headless: bool) -> Self {
+    #[must_use]
+    pub fn headless(mut self, headless: bool) -> Self {
         self.headless = Some(headless);
         self
     }
 
     /// Sets the buffer capacity for the writer
-    #[must_use] pub fn buffer_capacity(mut self, capacity: usize) -> Self {
+    #[must_use]
+    pub fn buffer_capacity(mut self, capacity: usize) -> Self {
         self.buffer_capacity = Some(capacity);
         self
     }
