@@ -84,7 +84,7 @@ impl Policy {
         for &n in sequence {
             ibuf.push(match n {
                 b'A' | b'C' | b'G' | b'T' => n,
-                _ => match rng.gen_range(0..4) {
+                _ => match rng.random_range(0..4) {
                     0 => b'A',
                     1 => b'C',
                     2 => b'G',

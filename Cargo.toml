@@ -16,14 +16,13 @@ bitnuc = "0.2.8"
 bytemuck = "1.21.0"
 byteorder = "1.5.0"
 memmap2 = "0.9.5"
-rand = { version = "0.8.5", features = ["small_rng"] }
+rand = { version = "0.9.1", features = ["small_rng"] }
 thiserror = "2.0.8"
 zstd = { version = "0.13.3", features = ["zstdmt"] }
 
 [dev-dependencies]
-nucgen = "0.1.1"
-rand = "0.8.5"
-niffler = "2.6.0"
+nucgen = "0.2.0"
+niffler = "3.0.0"
 seq_io = "0.3.2"
 parking_lot = "0.12.3"
 itoa = "1.0.14"

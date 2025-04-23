@@ -120,7 +120,7 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
 
     // Write the binary sequence
     let mut sequence = Sequence::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _ in 0..num_seq {
         sequence.fill_buffer(&mut rng, seq_size);
         if !writer.write_nucleotides(0, sequence.bytes())? {
@@ -146,7 +146,7 @@ fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usiz
     // Write the binary sequence
     let mut r1 = Sequence::new();
     let mut r2 = Sequence::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _ in 0..num_seq {
         r1.fill_buffer(&mut rng, r1_size);
         r2.fill_buffer(&mut rng, r2_size);
