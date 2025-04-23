@@ -118,10 +118,10 @@
 //! # std::fs::remove_file("example.vbq").unwrap_or(());
 //! ```
 
-pub mod header;
-pub mod index;
-pub mod reader;
-pub mod writer;
+mod header;
+mod index;
+mod reader;
+mod writer;
 
 pub use header::{BlockHeader, VBinseqHeader};
 pub use index::{BlockIndex, BlockRange};
