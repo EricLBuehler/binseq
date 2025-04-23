@@ -27,3 +27,6 @@ seq_io = "0.3.2"
 parking_lot = "0.12.3"
 itoa = "1.0.14"
 memchr = "2.7.4"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
