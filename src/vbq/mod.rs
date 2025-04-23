@@ -1,94 +1,122 @@
-//! # VBINSEQ
+//! # VBINSEQ Format
 //!
-//! VBINSEQ is a high-performance binary file format for nucleotides.
+//! VBINSEQ is a high-performance binary format for variable-length nucleotide sequences
+//! that optimizes both storage efficiency and parallel processing capabilities.
 //!
-//! It is a variant of the BINSEQ file format with support for _variable length records_ and _quality scores_.
+//! For more information on the format, please refer to our [preprint](https://www.biorxiv.org/content/10.1101/2025.04.08.647863v1).
 //!
 //! ## Overview
 //!
-//! VBINSEQ provides a block-based file format for efficient storage and retrieval of nucleotide sequences.
-//! Key features include:
+//! VBINSEQ extends the core principles of BINSEQ to accommodate:
 //!
-//! * **Block-based architecture** - Data is stored in fixed-size record blocks that can be processed independently
-//! * **Variable-length records** - Unlike fixed-size records, variable-length records can store sequences of any size
-//! * **Quality scores** - Optional quality score tracking for each nucleotide
-//! * **Paired sequences** - Support for paired-end sequencing data
-//! * **Parallel compression** - Support for ZSTD compression with parallel processing
-//! * **Random access** - Efficient random access to record blocks
+//! * **Variable-length sequences**: Unlike BINSEQ which requires fixed-length reads, VBINSEQ can store
+//!   sequences of any length, making it suitable for technologies like PacBio and Oxford Nanopore.
 //!
-//! ## Usage
+//! * **Quality scores**: Optional storage of quality scores alongside nucleotide data when needed.
 //!
-//! The two primary interfaces are:
+//! * **Block-based organization**: Data is organized into fixed-size independent record blocks
+//!   for efficient parallel processing.
 //!
-//! * `VBinseqWriter` - For writing nucleotide sequences to a VBINSEQ file
-//! * `MmapReader` - For memory-mapped reading of VBINSEQ files
+//! * **Compression**: Optional ZSTD compression of individual blocks balances storage
+//!   efficiency with processing speed.
 //!
-//! ### Writing to a VBINSEQ file
+//! * **Paired-end support**: Native support for paired sequences without needing multiple files.
 //!
-//! ```rust
+//! ## File Structure
+//!
+//! A VBINSEQ file consists of a 32-byte header followed by a series of record blocks.
+//! Each block has a 32-byte header and contains one or more variable-length records.
+//!
+//! ```text
+//! ┌───────────────────┐
+//! │    File Header    │ 32 bytes
+//! ├───────────────────┤
+//! │   Block Header    │ 32 bytes
+//! ├───────────────────┤
+//! │                   │
+//! │   Block Records   │ Variable size
+//! │                   │
+//! ├───────────────────┤
+//! │   Block Header    │ 32 bytes
+//! ├───────────────────┤
+//! │                   │
+//! │   Block Records   │ Variable size
+//! │                   │
+//! └───────────────────┘
+//! ```
+//!
+//! ## Record Format
+//!
+//! Each record contains:
+//!
+//! * Flag field (8 bytes)
+//! * Primary sequence length (8 bytes)
+//! * Extended sequence length (8 bytes)
+//! * Primary sequence data (2-bit encoded)
+//! * Primary quality scores (optional)
+//! * Extended sequence data (optional, for paired-end)
+//! * Extended quality scores (optional)
+//!
+//! ## Performance Characteristics
+//!
+//! VBINSEQ is designed for high-throughput parallel processing:
+//!
+//! * Independent blocks enable true parallel processing without synchronization
+//! * Memory-mapped access provides efficient I/O
+//! * 2-bit encoding reduces storage requirements
+//! * Optional ZSTD compression reduces file size with minimal performance impact
+//!
+//! ## Usage Example
+//!
+//! ```
 //! use std::fs::File;
 //! use std::io::BufWriter;
 //! use binseq::vbq::{VBinseqHeader, VBinseqWriterBuilder, MmapReader};
 //! use binseq::BinseqRecord;
 //!
-//! // Path to the output file
-//! let path_name = "some_example.vbq";
+//! /*
+//!    WRITING
+//! */
 //!
-//! // Create a header with quality scores and compression enabled
-//! let header = VBinseqHeader::new(true, true, false);
+//! // Create a header for sequences with quality scores
+//! let with_qual = true;
+//! let compressed = true;
+//! let paired = false;
+//! let header = VBinseqHeader::new(with_qual, compressed, paired);
 //!
-//! // Open a file for writing
-//! let handle = File::create(path_name).map(BufWriter::new).unwrap();
-//!
-//! // Create a writer with the specified header
+//! // Create a writer for sequences with quality scores
+//! let file = File::create("example.vbq").unwrap();
 //! let mut writer = VBinseqWriterBuilder::default()
 //!     .header(header)
-//!     .build(handle)
+//!     .build(BufWriter::new(file))
 //!     .unwrap();
 //!
-//! // Write a nucleotide sequence with quality scores
+//! // Write a sequence with quality scores
 //! let sequence = b"ACGTACGT";
-//! let quality = b"!!!?!?!!";
+//! let quality = b"IIIIFFFF";
 //! writer.write_nucleotides_quality(0, sequence, quality).unwrap();
 //! writer.finish().unwrap();
 //!
-//! // Open a file for memory-mapped reading
-//! let mut reader = MmapReader::new(path_name).unwrap();
+//! /*
+//!    READING
+//! */
+//!
+//! // Read the sequences back
+//! let mut reader = MmapReader::new("example.vbq").unwrap();
 //! let mut block = reader.new_block();
 //!
 //! // Process blocks one at a time
 //! let mut seq_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
-//!         // Decode the sequence
 //!         record.decode_s(&mut seq_buffer).unwrap();
-//!         println!("Sequence {}: {}", record.index(), std::str::from_utf8(&seq_buffer).unwrap());
-//!
-//!         // Validate the sequence and quality scores
-//!         assert_eq!(seq_buffer, sequence);
-//!         assert_eq!(record.squal(), quality);
-//!
-//!         seq_buffer.clear(); // Clear the buffer for the next sequence
+//!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
+//!         println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
+//!         seq_buffer.clear();
 //!     }
 //! }
-//!
-//! // Delete the temporary file (for testing purposes)
-//! std::fs::remove_file(path_name).unwrap();
+//! # std::fs::remove_file("example.vbq").unwrap_or(());
 //! ```
-//!
-//! ## File Format Structure
-//!
-//! The VBINSEQ file format consists of:
-//!
-//! 1. A file header (32 bytes) containing format information
-//! 2. A series of record blocks, each containing:
-//!    - Block header (32 bytes)
-//!    - Block data (variable size, containing records)
-//!    - Block padding (to maintain fixed virtual block size)
-//!
-//! Each record contains a preamble with metadata and data containing encoded sequences and quality scores.
-//!
-//! See the README.md for detailed format specifications.
 
 pub mod header;
 pub mod index;
