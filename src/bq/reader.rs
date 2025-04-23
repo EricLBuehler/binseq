@@ -198,6 +198,27 @@ impl RecordConfig {
 ///
 /// The reader ensures thread-safety through the use of `Arc` for sharing the
 /// memory-mapped data between threads.
+///
+/// # Examples
+///
+/// ```
+/// use binseq::bq::MmapReader;
+/// use binseq::Result;
+///
+/// fn main() -> Result<()> {
+///     let path = "./data/subset.bq";
+///     let reader = MmapReader::new(path)?;
+///
+///     // Calculate the number of records in the file
+///     let num_records = reader.num_records();
+///     println!("Number of records: {}", num_records);
+///
+///     // Get the record at index 20 (0-indexed)
+///     let record = reader.get(20)?;
+///
+///     Ok(())
+/// }
+/// ```
 pub struct MmapReader {
     /// Memory mapped file contents, wrapped in Arc for thread-safe sharing
     mmap: Arc<Mmap>,
