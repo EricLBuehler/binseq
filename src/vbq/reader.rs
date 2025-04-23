@@ -645,6 +645,21 @@ impl MmapReader {
     /// # Returns
     ///
     /// The path where the index file would be located
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use binseq::vbq::MmapReader;
+    /// use binseq::Result;
+    ///
+    /// fn main() -> Result<()> {
+    ///     let path = "./data/subset.vbq";
+    ///     let reader = MmapReader::new(path)?;
+    ///     let index_path = reader.index_path();
+    ///     assert_eq!(index_path.to_str(), Some("./data/subset.vbq.vqi"));
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn index_path(&self) -> PathBuf {
         let mut p = self.path.as_os_str().to_owned();
         p.push(".vqi");
