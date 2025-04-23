@@ -419,6 +419,10 @@ impl<R: Read> StreamReader<R> {
     /// * `Ok(&BinseqHeader)` - A reference to the validated header
     /// * `Err(Error)` - If reading or validating the header fails
     ///
+    /// # Panics
+    ///
+    /// Panics if the header is missing when expected in the stream.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -427,7 +431,10 @@ impl<R: Read> StreamReader<R> {
     /// * End of stream is reached before the full header can be read
     pub fn read_header(&mut self) -> Result<&BinseqHeader> {
         if self.header.is_some() {
-            return Ok(self.header.as_ref().unwrap());
+            return Ok(self
+                .header
+                .as_ref()
+                .expect("Missing header when expected in stream"));
         }
 
         // Ensure we have enough data for the header
@@ -493,6 +500,10 @@ impl<R: Read> StreamReader<R> {
     /// * `Ok(None)` - End of stream was reached (no more records)
     /// * `Err(Error)` - If an error occurred during reading
     ///
+    /// # Panics
+    ///
+    /// Panics if the configuration is missing when expected in the stream.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -505,7 +516,9 @@ impl<R: Read> StreamReader<R> {
             self.read_header()?;
         }
 
-        let config = self.config.unwrap();
+        let config = self
+            .config
+            .expect("Missing configuration when expected in stream");
         let record_size = config.record_size_bytes();
 
         // Ensure we have enough data for a complete record
