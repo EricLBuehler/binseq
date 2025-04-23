@@ -26,7 +26,7 @@ fn server(header: BinseqHeader, sequence: Vec<u8>) -> Result<()> {
     // Write sequences in a loop
     for i in 0..10 {
         writer.write_nucleotides(i, &sequence)?;
-        println!("Server: Sent record {}", i);
+        println!("Server: Sent record {i}");
 
         // Simulate delay between records
         thread::sleep(std::time::Duration::from_millis(100));
@@ -71,7 +71,7 @@ fn client() -> Result<()> {
         count += 1;
     }
 
-    println!("Client: Received {} records total", count);
+    println!("Client: Received {count} records total");
 
     Ok(())
 }
@@ -87,13 +87,13 @@ fn main() -> Result<()> {
     let sequence_clone = sequence.clone();
     let server_thread = thread::spawn(move || {
         if let Err(e) = server(header, sequence_clone) {
-            eprintln!("Server error: {:?}", e);
+            eprintln!("Server error: {e:?}");
         }
     });
 
     // Run the client in the main thread
     if let Err(e) = client() {
-        eprintln!("Client error: {:?}", e);
+        eprintln!("Client error: {e:?}");
     }
 
     // Wait for the server to finish

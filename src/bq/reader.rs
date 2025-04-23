@@ -368,9 +368,9 @@ pub struct StreamReader<R: Read> {
 }
 
 impl<R: Read> StreamReader<R> {
-    /// Creates a new StreamReader with the default buffer size
+    /// Creates a new `StreamReader` with the default buffer size
     ///
-    /// This constructor initializes a StreamReader that will read from the provided
+    /// This constructor initializes a `StreamReader` that will read from the provided
     /// source, using an 8K default buffer size.
     ///
     /// # Arguments
@@ -384,9 +384,9 @@ impl<R: Read> StreamReader<R> {
         Self::with_capacity(reader, 8192)
     }
 
-    /// Creates a new StreamReader with a specified buffer capacity
+    /// Creates a new `StreamReader` with a specified buffer capacity
     ///
-    /// This constructor initializes a StreamReader with a custom buffer size,
+    /// This constructor initializes a `StreamReader` with a custom buffer size,
     /// which can be tuned based on the expected usage pattern.
     ///
     /// # Arguments
@@ -511,7 +511,7 @@ impl<R: Read> StreamReader<R> {
         // Ensure we have enough data for a complete record
         while self.buffer_len - self.buffer_pos < record_size {
             match self.fill_buffer() {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(Error::ReadError(ReadError::EndOfStream)) => {
                     // End of stream reached - if we have any partial data, it's an error
                     if self.buffer_len - self.buffer_pos > 0 {
@@ -544,7 +544,7 @@ impl<R: Read> StreamReader<R> {
     ///
     /// # Returns
     ///
-    /// The inner reader that was used by this StreamReader
+    /// The inner reader that was used by this `StreamReader`
     pub fn into_inner(self) -> R {
         self.reader
     }

@@ -522,9 +522,9 @@ pub struct StreamWriter<W: Write> {
 }
 
 impl<W: Write> StreamWriter<W> {
-    /// Creates a new StreamWriter with the default buffer size
+    /// Creates a new `StreamWriter` with the default buffer size
     ///
-    /// This constructor initializes a StreamWriter with an 8K buffer
+    /// This constructor initializes a `StreamWriter` with an 8K buffer
     /// for efficient writing to the underlying writer.
     ///
     /// # Arguments
@@ -542,7 +542,7 @@ impl<W: Write> StreamWriter<W> {
         Self::with_capacity(inner, 8192, header, policy, headless)
     }
 
-    /// Creates a new StreamWriter with a specified buffer capacity
+    /// Creates a new `StreamWriter` with a specified buffer capacity
     ///
     /// This constructor allows customizing the buffer size based on
     /// expected usage patterns and performance requirements.
@@ -642,9 +642,9 @@ impl<W: Write> StreamWriter<W> {
     }
 }
 
-/// Builder for StreamWriter instances
+/// Builder for `StreamWriter` instances
 ///
-/// This builder provides a convenient way to create and configure StreamWriter
+/// This builder provides a convenient way to create and configure `StreamWriter`
 /// instances with custom buffer sizes and other settings.
 #[derive(Default)]
 pub struct StreamWriterBuilder {
@@ -660,30 +660,30 @@ pub struct StreamWriterBuilder {
 
 impl StreamWriterBuilder {
     /// Sets the header for the writer
-    pub fn header(mut self, header: BinseqHeader) -> Self {
+    #[must_use] pub fn header(mut self, header: BinseqHeader) -> Self {
         self.header = Some(header);
         self
     }
 
     /// Sets the policy for handling invalid nucleotides
-    pub fn policy(mut self, policy: Policy) -> Self {
+    #[must_use] pub fn policy(mut self, policy: Policy) -> Self {
         self.policy = Some(policy);
         self
     }
 
     /// Sets headless mode (whether to skip writing the header)
-    pub fn headless(mut self, headless: bool) -> Self {
+    #[must_use] pub fn headless(mut self, headless: bool) -> Self {
         self.headless = Some(headless);
         self
     }
 
     /// Sets the buffer capacity for the writer
-    pub fn buffer_capacity(mut self, capacity: usize) -> Self {
+    #[must_use] pub fn buffer_capacity(mut self, capacity: usize) -> Self {
         self.buffer_capacity = Some(capacity);
         self
     }
 
-    /// Builds a StreamWriter with the configured settings
+    /// Builds a `StreamWriter` with the configured settings
     ///
     /// # Arguments
     ///

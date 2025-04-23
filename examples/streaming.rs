@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         count += 1;
     }
 
-    println!("Read {} records", count);
+    println!("Read {count} records");
 
     Ok(())
 }
