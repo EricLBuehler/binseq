@@ -542,6 +542,9 @@ impl BlockIndex {
     }
 
     /// Reads an index from a path
+    ///
+    /// # Panics
+    /// Panics if the path is not a valid UTF-8 string.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let Some(upstream_file) = path.as_ref().to_str().unwrap().strip_suffix(".vqi") else {
             return Err(IndexError::MissingUpstreamFile(
