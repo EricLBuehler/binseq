@@ -19,7 +19,7 @@ jobs:
       - name: Formatting
         run: cargo fmt --check
       - name: Linting
-        run: cargo clippy --verbose --check
+        run: cargo clippy --verbose
 
   example_read_write:
     runs-on: ubuntu-latest
