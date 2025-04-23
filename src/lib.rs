@@ -1,23 +1,24 @@
 #![doc = include_str!("../README.md")]
 //!
-//! # Overview
+//! # BINSEQ
 //!
-//! The `binseq` library provides efficient tools for working with binary-encoded
-//! nucleotide sequences. It offers:
+//! The `binseq` library provides efficient tools for working with the [BINSEQ](https://www.biorxiv.org/content/10.1101/2025.04.08.647863v1) file format family.
 //!
-//! - Compact 2-bit encoding of nucleotide sequences
+//! It offers tools to read and write BINSEQ files, providing:
+//!
+//! - Compact 2-bit encoding and decoding of nucleotide sequences through [`bitnuc`](https://docs.rs/bitnuc/latest/bitnuc/)
 //! - Memory-mapped file access for efficient reading
-//! - Parallel processing capabilities
-//! - Configurable policies for handling invalid nucleotides
+//! - Parallel processing capabilities for arbitrary tasks through the [`ParallelProcessor`] trait.
+//! - Configurable [`Policy`] for handling invalid nucleotides
 //! - Support for both single and paired-end sequences
+//! - Abstract [`BinseqRecord`] trait for representing records from both `.bq` and `.vbq` files.
 //!
-//! # Core Components
+//! ## Crate Organization
 //!
-//! - [`BinseqWriter`]: Writes sequences to binary format
-//! - [`MmapReader`]: Reads sequences using memory mapping
-//! - [`BinseqHeader`]: Defines file format and sequence lengths
-//! - [`Policy`]: Configures invalid nucleotide handling
-//! - [`ParallelProcessor`]: Enables parallel sequence processing
+//! This library is split into 3 major parts.
+//!
+//! There are the [`bq`] and [`vbq`] modules, which provide tools for reading and writing `BQ` and `VBQ` files respectively.
+//! Then there are traits and utilities that are ubiquitous across the library which are available at the top-level of the crate.
 //!
 //! # Example
 //!
