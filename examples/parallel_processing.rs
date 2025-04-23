@@ -19,6 +19,7 @@ pub struct MyProcessor {
     xbuf: Vec<u8>,
 }
 impl MyProcessor {
+    #[must_use]
     pub fn counter(&self) -> usize {
         self.counter.load(Ordering::Relaxed)
     }
@@ -81,7 +82,7 @@ pub fn main() -> Result<()> {
                 mmap_processing(binseq_path_single, n_threads)?;
                 Ok(())
             },
-            &format!("single - mmap_parallel_processing ({})", n_threads),
+            &format!("single - mmap_parallel_processing ({n_threads})"),
         );
     }
     for n_threads in 1..=16 {
@@ -93,7 +94,7 @@ pub fn main() -> Result<()> {
                 mmap_processing(binseq_path_paired, n_threads)?;
                 Ok(())
             },
-            &format!("paired - mmap_parallel_processing ({})", n_threads),
+            &format!("paired - mmap_parallel_processing ({n_threads})"),
         );
     }
 
@@ -107,7 +108,7 @@ where
     let now = std::time::Instant::now();
     f().unwrap();
     let elapsed = now.elapsed();
-    eprintln!("Elapsed time ({}): {:?}", name, elapsed);
+    eprintln!("Elapsed time ({name}): {elapsed:?}");
 }
 
 fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()> {
@@ -128,10 +129,7 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
         }
     }
     writer.flush()?;
-    eprintln!(
-        "Finished writing {} records to path: {}",
-        num_seq, binseq_path
-    );
+    eprintln!("Finished writing {num_seq} records to path: {binseq_path}");
     Ok(())
 }
 
@@ -156,9 +154,6 @@ fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usiz
         }
     }
     writer.flush()?;
-    eprintln!(
-        "Finished writing {} records to path: {}",
-        num_seq, binseq_path
-    );
+    eprintln!("Finished writing {num_seq} records to path: {binseq_path}");
     Ok(())
 }

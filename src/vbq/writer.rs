@@ -83,7 +83,7 @@ fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usi
     record_byte_size(schunk, xchunk) + slen + xlen
 }
 
-/// A builder for creating configured VBinseqWriter instances
+/// A builder for creating configured `VBinseqWriter` instances
 ///
 /// This builder provides a fluent interface for configuring and creating a
 /// `VBinseqWriter` with customized settings. It allows specifying the file header,
@@ -123,7 +123,7 @@ impl VBinseqWriterBuilder {
     ///
     /// # Parameters
     ///
-    /// * `header` - The VBinseqHeader to use for the file
+    /// * `header` - The `VBinseqHeader` to use for the file
     ///
     /// # Returns
     ///
@@ -140,6 +140,7 @@ impl VBinseqWriterBuilder {
     ///
     /// let builder = VBinseqWriterBuilder::default().header(header);
     /// ```
+    #[must_use]
     pub fn header(mut self, header: VBinseqHeader) -> Self {
         self.header = Some(header);
         self
@@ -167,6 +168,7 @@ impl VBinseqWriterBuilder {
     ///
     /// let builder = VBinseqWriterBuilder::default().policy(Policy::IgnoreSequence);
     /// ```
+    #[must_use]
     pub fn policy(mut self, policy: Policy) -> Self {
         self.policy = Some(policy);
         self
@@ -194,14 +196,15 @@ impl VBinseqWriterBuilder {
     /// // Create a headless writer for parallel writing
     /// let builder = VBinseqWriterBuilder::default().headless(true);
     /// ```
+    #[must_use]
     pub fn headless(mut self, headless: bool) -> Self {
         self.headless = Some(headless);
         self
     }
 
-    /// Builds a VBinseqWriter with the configured settings
+    /// Builds a `VBinseqWriter` with the configured settings
     ///
-    /// This finalizes the builder and creates a new VBinseqWriter instance using
+    /// This finalizes the builder and creates a new `VBinseqWriter` instance using
     /// the provided writer and the configured settings. If any settings were not
     /// explicitly set, default values will be used.
     ///
@@ -211,7 +214,7 @@ impl VBinseqWriterBuilder {
     ///
     /// # Returns
     ///
-    /// * `Ok(VBinseqWriter)` - A configured VBinseqWriter ready for use
+    /// * `Ok(VBinseqWriter)` - A configured `VBinseqWriter` ready for use
     /// * `Err(_)` - If an error occurred while initializing the writer
     ///
     /// # Examples
@@ -311,7 +314,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// Initializes the writer by writing the file header
     ///
     /// This method is called automatically during creation unless headless mode is enabled.
-    /// It writes the VBinseqHeader to the underlying writer.
+    /// It writes the `VBinseqHeader` to the underlying writer.
     ///
     /// # Returns
     ///
@@ -779,12 +782,12 @@ impl<W: Write> VBinseqWriter<W> {
         self.inner.by_ref()
     }
 
-    /// Provides a mutable reference to the BlockWriter
+    /// Provides a mutable reference to the `BlockWriter`
     fn cblock_mut(&mut self) -> &mut BlockWriter {
         &mut self.cblock
     }
 
-    /// Ingests data from another VBinseqWriter that uses a `Vec<u8>` as its inner writer
+    /// Ingests data from another `VBinseqWriter` that uses a `Vec<u8>` as its inner writer
     ///
     /// This method is particularly useful for parallel processing, where multiple writers
     /// might be writing to memory buffers and need to be combined into a single file. It
@@ -794,7 +797,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///
     /// # Parameters
     ///
-    /// * `other` - Another VBinseqWriter whose inner writer is a `Vec<u8>`
+    /// * `other` - Another `VBinseqWriter` whose inner writer is a `Vec<u8>`
     ///
     /// # Returns
     ///
@@ -1022,7 +1025,7 @@ impl BlockWriter {
         self.zbuf.clear();
     }
 
-    /// Ingests *all* bytes from another BlockWriter.
+    /// Ingests *all* bytes from another `BlockWriter`.
     ///
     /// Because both block sizes should be equivalent the process should take
     /// at most two steps.
@@ -1079,7 +1082,7 @@ impl BlockWriter {
 
     /// Takes as many bytes as possible from the other into self
     ///
-    /// Do not call this directly - always go through `ingest
+    /// Do not call this directly - always go through `ingest`
     fn ingest_subset(&mut self, other: &mut Self) -> Result<()> {
         let remaining = self.block_size - self.pos;
         let (start_index, end_byte) = other

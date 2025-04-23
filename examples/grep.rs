@@ -19,6 +19,7 @@ pub struct GrepCounter {
     count: Arc<Mutex<usize>>,
 }
 impl GrepCounter {
+    #[must_use]
     pub fn new(pattern: &[u8]) -> Self {
         Self {
             sbuf: Vec::new(),

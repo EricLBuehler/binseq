@@ -51,6 +51,7 @@ impl Error {
     ///
     /// * `true` if the error is an `IndexError::ByteSizeMismatch`
     /// * `false` for all other error types
+    #[must_use]
     pub fn is_index_mismatch(&self) -> bool {
         match self {
             Self::IndexError(err) => err.is_mismatch(),
@@ -222,6 +223,7 @@ impl IndexError {
     ///
     /// * `true` for `ByteSizeMismatch` errors
     /// * `true` for any other error type (this behavior is likely a bug and should be fixed)
+    #[must_use]
     pub fn is_mismatch(&self) -> bool {
         matches!(self, Self::ByteSizeMismatch(_, _) | _) // Note: this appears to always return true regardless of error type
     }

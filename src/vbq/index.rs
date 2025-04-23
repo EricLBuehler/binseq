@@ -13,11 +13,12 @@ use super::{
 };
 use crate::error::{IndexError, Result};
 
-/// Size of BlockRange in bytes
+/// Size of `BlockRange` in bytes
 pub const SIZE_BLOCK_RANGE: usize = 32;
-/// Size of IndexHeader in bytes
+/// Size of `IndexHeader` in bytes
 pub const INDEX_HEADER_SIZE: usize = 32;
 /// Magic number to designate index (VBQINDEX)
+#[allow(clippy::unreadable_literal)]
 pub const INDEX_MAGIC: u64 = 0x5845444e49514256;
 /// Index Block Reservation
 pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
@@ -106,6 +107,7 @@ impl BlockRange {
     /// // Create a new block range for a block starting at byte 1024
     /// let range = BlockRange::new(1024, 8192, 1000, 5000);
     /// ```
+    #[must_use]
     pub fn new(start_offset: u64, len: u64, block_records: u32, cumulative_records: u32) -> Self {
         Self {
             start_offset,
@@ -120,10 +122,10 @@ impl BlockRange {
     ///
     /// This method serializes the `BlockRange` to a fixed-size 32-byte structure and
     /// writes it to the provided writer. The serialized format is:
-    /// - Bytes 0-7: start_offset (u64, little endian)
+    /// - Bytes 0-7: `start_offset` (u64, little endian)
     /// - Bytes 8-15: len (u64, little endian)
-    /// - Bytes 16-19: block_records (u32, little endian)
-    /// - Bytes 20-23: cumulative_records (u32, little endian)
+    /// - Bytes 16-19: `block_records` (u32, little endian)
+    /// - Bytes 20-23: `cumulative_records` (u32, little endian)
     /// - Bytes 24-31: reservation (8 bytes)
     ///
     /// # Parameters
@@ -161,11 +163,12 @@ impl BlockRange {
     /// # Format
     ///
     /// The buffer is expected to contain:
-    /// - Bytes 0-7: start_offset (u64, little endian)
+    /// - Bytes 0-7: `start_offset` (u64, little endian)
     /// - Bytes 8-15: len (u64, little endian)
-    /// - Bytes 16-19: block_records (u32, little endian)
-    /// - Bytes 20-23: cumulative_records (u32, little endian)
+    /// - Bytes 16-19: `block_records` (u32, little endian)
+    /// - Bytes 20-23: `cumulative_records` (u32, little endian)
     /// - Bytes 24-31: reservation (ignored, default value used)
+    #[must_use]
     pub fn from_exact(buffer: &[u8; SIZE_BLOCK_RANGE]) -> Self {
         Self {
             start_offset: LittleEndian::read_u64(&buffer[0..8]),
@@ -193,6 +196,7 @@ impl BlockRange {
     /// # Panics
     ///
     /// This method will panic if the buffer is less than 32 bytes long.
+    #[must_use]
     pub fn from_bytes(buffer: &[u8]) -> Self {
         let mut buf = [0; SIZE_BLOCK_RANGE];
         buf.copy_from_slice(buffer);
@@ -261,7 +265,7 @@ impl IndexHeader {
     /// # Format
     ///
     /// The header is expected to be 32 bytes with the following structure:
-    /// - Bytes 0-7: magic number (u64, little endian, must be INDEX_MAGIC)
+    /// - Bytes 0-7: magic number (u64, little endian, must be `INDEX_MAGIC`)
     /// - Bytes 8-15: file size in bytes (u64, little endian)
     /// - Bytes 16-31: reserved for future extensions
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
@@ -356,6 +360,7 @@ impl BlockIndex {
     /// # Returns
     ///
     /// A new empty `BlockIndex` instance
+    #[must_use]
     pub fn new(header: IndexHeader) -> Self {
         Self {
             header,
@@ -377,11 +382,12 @@ impl BlockIndex {
     /// let index = BlockIndex::from_path(Path::new("example.vbq.vqi")).unwrap();
     /// println!("The file contains {} blocks", index.n_blocks());
     /// ```
+    #[must_use]
     pub fn n_blocks(&self) -> usize {
         self.ranges.len()
     }
 
-    /// Writes the collection of BlockRange to a file
+    /// Writes the collection of `BlockRange` to a file
     /// Saves the index to a file
     ///
     /// This writes the index header and all block ranges to a file, which can be loaded
@@ -418,7 +424,7 @@ impl BlockIndex {
         Ok(())
     }
 
-    /// Write the collection of BlockRange to an output handle
+    /// Write the collection of `BlockRange` to an output handle
     /// Writes all block ranges to the provided writer
     ///
     /// This method is used internally by `save_to_path` to write the block ranges
@@ -596,6 +602,7 @@ impl BlockIndex {
     ///              i, range.block_records, range.start_offset);
     /// }
     /// ```
+    #[must_use]
     pub fn ranges(&self) -> &[BlockRange] {
         &self.ranges
     }
@@ -606,6 +613,6 @@ impl BlockIndex {
                 "{}\t{}\t{}\t{}",
                 range.start_offset, range.len, range.block_records, range.cumulative_records
             );
-        })
+        });
     }
 }

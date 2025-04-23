@@ -36,6 +36,7 @@ use super::header::SIZE_HEADER;
 /// let size = expected_file_size(1000, 100);
 /// assert!(size > 0);
 /// ```
+#[must_use]
 pub fn expected_file_size(num_records: usize, seq_len: usize) -> usize {
     // number of u64 chunks in the sequence
     let n_chunks = seq_len.div_ceil(32);

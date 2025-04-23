@@ -48,6 +48,7 @@ impl<'a> RefRecord<'a> {
     /// # Panics
     ///
     /// Panics if the buffer length doesn't match the expected size from the config
+    #[must_use]
     pub fn new(id: u64, buffer: &'a [u64], config: RecordConfig) -> Self {
         assert_eq!(buffer.len(), config.record_size_u64());
         Self { id, buffer, config }
@@ -55,6 +56,7 @@ impl<'a> RefRecord<'a> {
     /// Returns the record's configuration
     ///
     /// The configuration defines the layout and size of the record's components.
+    #[must_use]
     pub fn config(&self) -> RecordConfig {
         self.config
     }
@@ -74,7 +76,7 @@ impl BinseqRecord for RefRecord<'_> {
         self.config.xlen
     }
     fn sbuf(&self) -> &[u64] {
-        &self.buffer[1..1 + self.config.schunk as usize]
+        &self.buffer[1..=(self.config.schunk as usize)]
     }
     fn xbuf(&self) -> &[u64] {
         &self.buffer[1 + self.config.schunk as usize..]
@@ -286,6 +288,7 @@ impl MmapReader {
     ///
     /// This is calculated by subtracting the header size from the total file size
     /// and dividing by the size of each record.
+    #[must_use]
     pub fn num_records(&self) -> usize {
         (self.mmap.len() - SIZE_HEADER) / self.config.record_size_bytes()
     }
@@ -293,11 +296,13 @@ impl MmapReader {
     /// Returns a copy of the binary sequence file header
     ///
     /// The header contains format information and sequence length specifications.
+    #[must_use]
     pub fn header(&self) -> BinseqHeader {
         self.header
     }
 
     /// Checks if the file has paired-records
+    #[must_use]
     pub fn is_paired(&self) -> bool {
         self.header.is_paired()
     }

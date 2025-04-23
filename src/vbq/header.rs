@@ -21,11 +21,13 @@ use crate::error::{HeaderError, ReadError, Result};
 /// Magic number for file identification: "VSEQ" in ASCII (0x51455356)
 ///
 /// This constant is used in the file header to identify VBINSEQ formatted files.
+#[allow(clippy::unreadable_literal)]
 const MAGIC: u32 = 0x51455356;
 
 /// Magic number for block identification: "BLOCKSEQ" in ASCII (0x5145534B434F4C42)
 ///
 /// This constant is used in block headers to validate block integrity.
+#[allow(clippy::unreadable_literal)]
 const BLOCK_MAGIC: u64 = 0x5145534B434F4C42;
 
 /// Current format version number
@@ -141,6 +143,7 @@ impl VBinseqHeader {
     /// // Create header with quality scores and compression, without paired sequences
     /// let header = VBinseqHeader::new(true, true, false);
     /// ```
+    #[must_use]
     pub fn new(qual: bool, compressed: bool, paired: bool) -> Self {
         Self::with_capacity(BLOCK_SIZE, qual, compressed, paired)
     }
@@ -162,6 +165,7 @@ impl VBinseqHeader {
     /// // Create header with a 256KB block size, with quality scores and compression
     /// let header = VBinseqHeader::with_capacity(256 * 1024, true, true, false);
     /// ```
+    #[must_use]
     pub fn with_capacity(block: u64, qual: bool, compressed: bool, paired: bool) -> Self {
         Self {
             magic: MAGIC,
@@ -215,8 +219,8 @@ impl VBinseqHeader {
             block,
             qual,
             compressed,
-            reserved,
             paired,
+            reserved,
         })
     }
 
@@ -272,6 +276,7 @@ impl VBinseqHeader {
         Self::from_bytes(&buffer)
     }
 
+    #[must_use]
     pub fn is_paired(&self) -> bool {
         self.paired
     }
@@ -327,6 +332,7 @@ impl BlockHeader {
     /// // Create a block header for a block with 1024 bytes and 100 records
     /// let header = BlockHeader::new(1024, 100);
     /// ```
+    #[must_use]
     pub fn new(size: u64, records: u32) -> Self {
         Self {
             magic: BLOCK_MAGIC,

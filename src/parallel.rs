@@ -21,6 +21,7 @@ impl BinseqReader {
         }
     }
 
+    #[must_use]
     pub fn is_paired(&self) -> bool {
         match self {
             Self::Bq(reader) => reader.is_paired(),

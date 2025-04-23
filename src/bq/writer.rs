@@ -81,8 +81,8 @@ pub struct Encoder {
     /// Policy for handling invalid nucleotides during encoding
     policy: Policy,
 
-    /// Random number generator for the RandomDraw policy
-    /// Seeded with RNG_SEED for reproducibility
+    /// Random number generator for the `RandomDraw` policy
+    /// Seeded with `RNG_SEED` for reproducibility
     rng: SmallRng,
 }
 impl Encoder {
@@ -99,6 +99,7 @@ impl Encoder {
     /// let header = BinseqHeader::new(100); // For sequences of length 100
     /// let encoder = Encoder::new(header);
     /// ```
+    #[must_use]
     pub fn new(header: BinseqHeader) -> Self {
         Self::with_policy(header, Policy::default())
     }
@@ -118,6 +119,7 @@ impl Encoder {
     /// let header = BinseqHeader::new(100);
     /// let encoder = Encoder::with_policy(header, Policy::SetToA);
     /// ```
+    #[must_use]
     pub fn with_policy(header: BinseqHeader, policy: Policy) -> Self {
         Self {
             header,
@@ -244,16 +246,19 @@ pub struct BinseqWriterBuilder {
     headless: Option<bool>,
 }
 impl BinseqWriterBuilder {
+    #[must_use]
     pub fn header(mut self, header: BinseqHeader) -> Self {
         self.header = Some(header);
         self
     }
 
+    #[must_use]
     pub fn policy(mut self, policy: Policy) -> Self {
         self.policy = Some(policy);
         self
     }
 
+    #[must_use]
     pub fn headless(mut self, headless: bool) -> Self {
         self.headless = Some(headless);
         self

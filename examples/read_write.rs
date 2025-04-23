@@ -38,11 +38,8 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
         }
     }
     writer.flush()?;
-    eprintln!(
-        "Finished writing {} records to path: {}",
-        num_records_write, binseq_path
-    );
-    eprintln!("Skipped {} records", skipped_records);
+    eprintln!("Finished writing {num_records_write} records to path: {binseq_path}");
+    eprintln!("Skipped {skipped_records} records");
 
     // Read the binary sequence
     let reader = MmapReader::new(binseq_path)?;
@@ -60,7 +57,7 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
         num_records_read += 1;
         record_buffer.clear();
     }
-    eprintln!("Finished reading {} records (mmap)", num_records_read);
+    eprintln!("Finished reading {num_records_read} records (mmap)");
     eprintln!(
         "Difference in total records: {}",
         num_records_write - num_records_read
@@ -126,8 +123,8 @@ fn read_write_paired(
         }
     }
     writer.flush()?;
-    eprintln!("Finished writing {} records", num_records);
-    eprintln!("Skipped {} records", num_skipped);
+    eprintln!("Finished writing {num_records} records");
+    eprintln!("Skipped {num_skipped} records");
 
     // Read the binary sequence with mmap
     let reader = MmapReader::new(binseq_path)?;
@@ -156,7 +153,7 @@ fn read_write_paired(
 
         n_processed += 1;
     }
-    eprintln!("Finished reading {} records", n_processed);
+    eprintln!("Finished reading {n_processed} records");
 
     Ok(())
 }

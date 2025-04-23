@@ -92,6 +92,7 @@ impl RecordBlock {
     /// # Returns
     ///
     /// A new empty `RecordBlock` instance
+    #[must_use]
     pub fn new(block_size: usize) -> Self {
         Self {
             index: 0,
@@ -109,6 +110,7 @@ impl RecordBlock {
     /// # Returns
     ///
     /// The number of records currently stored in this block
+    #[must_use]
     pub fn n_records(&self) -> usize {
         self.flags.len()
     }
@@ -137,6 +139,7 @@ impl RecordBlock {
     ///     println!("Record {}", record.index());
     /// }
     /// ```
+    #[must_use]
     pub fn iter(&self) -> RecordBlockIter {
         RecordBlockIter::new(self)
     }
@@ -336,6 +339,7 @@ pub struct RecordBlockIter<'a> {
     epos: usize,
 }
 impl<'a> RecordBlockIter<'a> {
+    #[must_use]
     pub fn new(block: &'a RecordBlock) -> Self {
         Self {
             block,
@@ -454,6 +458,7 @@ pub struct RefRecord<'a> {
 }
 impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         index: u64,
         flag: u64,
@@ -633,6 +638,7 @@ impl MmapReader {
     /// let reader = MmapReader::new("example.vbq").unwrap();
     /// let mut block = reader.new_block();
     /// ```
+    #[must_use]
     pub fn new_block(&self) -> RecordBlock {
         RecordBlock::new(self.header.block as usize)
     }
@@ -660,6 +666,7 @@ impl MmapReader {
     ///     Ok(())
     /// }
     /// ```
+    #[must_use]
     pub fn index_path(&self) -> PathBuf {
         let mut p = self.path.as_os_str().to_owned();
         p.push(".vqi");
@@ -675,16 +682,18 @@ impl MmapReader {
     /// # Returns
     ///
     /// A copy of the file's `VBinseqHeader`
+    #[must_use]
     pub fn header(&self) -> VBinseqHeader {
         self.header
     }
 
     /// Checks if the file contains paired records
+    #[must_use]
     pub fn is_paired(&self) -> bool {
         self.header.is_paired()
     }
 
-    /// Fills an existing RecordBlock with the next block of records from the file
+    /// Fills an existing `RecordBlock` with the next block of records from the file
     ///
     /// This method reads the next block of records from the current position in the file
     /// and populates the provided `RecordBlock` with the data. The block is cleared and reused

@@ -28,6 +28,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    #[must_use]
     pub fn new(writer: Box<dyn Write + Send>) -> Self {
         let global_buffer = Arc::new(Mutex::new(writer));
         Decoder {
@@ -42,6 +43,7 @@ impl Decoder {
         }
     }
 
+    #[must_use]
     pub fn num_records(&self) -> usize {
         *self.num_records.lock()
     }
@@ -105,6 +107,7 @@ impl ParallelProcessor for Decoder {
     }
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub fn write_fastq_parts<W: Write>(
     writer: &mut W,
     index: &[u8],
@@ -122,15 +125,12 @@ pub fn write_fastq_parts<W: Write>(
 }
 
 fn match_output(path: Option<&str>) -> Result<Box<dyn Write + Send>> {
-    match path {
-        Some(path) => {
-            let writer = File::create(path).map(BufWriter::new)?;
-            Ok(Box::new(writer))
-        }
-        None => {
-            let stdout = stdout();
-            Ok(Box::new(BufWriter::new(stdout)))
-        }
+    if let Some(path) = path {
+        let writer = File::create(path).map(BufWriter::new)?;
+        Ok(Box::new(writer))
+    } else {
+        let stdout = stdout();
+        Ok(Box::new(BufWriter::new(stdout)))
     }
 }
 
