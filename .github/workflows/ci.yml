@@ -18,6 +18,8 @@ jobs:
         run: cargo test --verbose --release
       - name: Formatting
         run: cargo fmt --check
+      - name: Linting
+        run: cargo clippy --verbose --check
 
   example_read_write:
     runs-on: ubuntu-latest
