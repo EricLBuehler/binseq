@@ -5,6 +5,8 @@ use super::Result;
 /// Exposes public methods for accessing internal data.
 /// Interfaces with the [`bitnuc`] crate for decoding sequences.
 ///
+/// Implemented by [`bq::RefRecord`](crate::bq::RefRecord) and [`vbq::RefRecord`](crate::vbq::RefRecord).
+///
 /// Used to interact with [`ParallelProcessor`](crate::ParallelProcessor) for easy parallel processing.
 pub trait BinseqRecord {
     /// Returns the global index of the record.
