@@ -111,7 +111,8 @@
 //! # Example: Streaming Access
 //!
 //! ```
-//! use binseq::{BinseqHeader, StreamReader, StreamWriterBuilder, Policy, Result};
+//! use binseq::{Policy, Result, BinseqRecord};
+//! use binseq::bq::{BinseqHeader, StreamReader, StreamWriterBuilder};
 //! use std::io::{BufReader, Cursor};
 //!
 //! fn main() -> Result<()> {
@@ -136,8 +137,9 @@
 //!     let mut reader = StreamReader::new(BufReader::new(Cursor::new(data)));
 //!
 //!     // Process records as they arrive
-//!     while let Some(record) = reader.next_record()? {
+//!     while let Some(record) = reader.next_record() {
 //!         // Process each record
+//!         let record = record?;
 //!         let flag = record.flag();
 //!     }
 //!
