@@ -24,7 +24,8 @@
 //! # Example
 //!
 //! ```
-//! use binseq::{Result, BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
+//! use binseq::Result;
+//! use binseq::prelude::*;
 //!
 //! #[derive(Clone, Default)]
 //! pub struct Processor {
@@ -78,6 +79,9 @@ mod record;
 
 /// VBQ - Variable length records, optional quality scores, compressed blocks
 pub mod vbq;
+
+/// Prelude - Commonly used types and traits
+pub mod prelude;
 
 pub use error::{Error, Result};
 pub use parallel::{BinseqReader, ParallelProcessor, ParallelReader};
