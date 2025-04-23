@@ -209,9 +209,8 @@ impl VBinseqHeader {
         let qual = buffer[13] != 0;
         let compressed = buffer[14] != 0;
         let paired = buffer[15] != 0;
-        let reserved = match buffer[16..32].try_into() {
-            Ok(reserved) => reserved,
-            Err(_) => return Err(HeaderError::InvalidReservedBytes.into()),
+        let Ok(reserved) = buffer[16..32].try_into() else {
+            return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
             magic,
@@ -245,9 +244,9 @@ impl VBinseqHeader {
         LittleEndian::write_u32(&mut buffer[0..4], self.magic);
         buffer[4] = self.format;
         LittleEndian::write_u64(&mut buffer[5..13], self.block);
-        buffer[13] = if self.qual { 1 } else { 0 };
-        buffer[14] = if self.compressed { 1 } else { 0 };
-        buffer[15] = if self.paired { 1 } else { 0 }; // Fixed bug: was using self.compressed
+        buffer[13] = self.qual.into();
+        buffer[14] = self.compressed.into();
+        buffer[15] = self.paired.into();
         buffer[16..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
