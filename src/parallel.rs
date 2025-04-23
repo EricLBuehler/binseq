@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{bq, error::ExtensionError, vbq, BinseqRecord, Result};
 
 /// An enum abstraction for BINSEQ readers that can process records in parallel
@@ -12,12 +14,14 @@ pub enum BinseqReader {
 }
 impl BinseqReader {
     pub fn new(path: &str) -> Result<Self> {
-        if path.ends_with(".bq") {
-            Ok(Self::Bq(bq::MmapReader::new(path)?))
-        } else if path.ends_with(".vbq") {
-            Ok(Self::Vbq(vbq::MmapReader::new(path)?))
-        } else {
-            return Err(ExtensionError::UnsupportedExtension(path.to_string()).into());
+        let pathbuf = Path::new(path);
+        match pathbuf.extension() {
+            Some(ext) => match ext.to_str() {
+                Some("bq") => Ok(Self::Bq(bq::MmapReader::new(path)?)),
+                Some("vbq") => Ok(Self::Vbq(vbq::MmapReader::new(path)?)),
+                _ => Err(ExtensionError::UnsupportedExtension(path.to_string()).into()),
+            },
+            None => Err(ExtensionError::UnsupportedExtension(path.to_string()).into()),
         }
     }
 
