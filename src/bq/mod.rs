@@ -108,6 +108,43 @@
 //! std::fs::remove_file(path).unwrap();
 //! ```
 //!
+//! # Example: Streaming Access
+//!
+//! ```
+//! use binseq::{BinseqHeader, StreamReader, StreamWriterBuilder, Policy, Result};
+//! use std::io::{BufReader, Cursor};
+//!
+//! fn main() -> Result<()> {
+//!     // Create a header for sequences of length 100
+//!     let header = BinseqHeader::new(100);
+//!
+//!     // Create a stream writer
+//!     let mut writer = StreamWriterBuilder::default()
+//!         .header(header)
+//!         .buffer_capacity(8192)
+//!         .build(Cursor::new(Vec::new()))?;
+//!
+//!     // Write sequences
+//!     let sequence = b"ACGT".repeat(25); // 100 nucleotides
+//!     writer.write_nucleotides(0, &sequence)?;
+//!
+//!     // Get the inner buffer
+//!     let buffer = writer.into_inner()?;
+//!     let data = buffer.into_inner();
+//!
+//!     // Create a stream reader
+//!     let mut reader = StreamReader::new(BufReader::new(Cursor::new(data)));
+//!
+//!     // Process records as they arrive
+//!     while let Some(record) = reader.next_record()? {
+//!         // Process each record
+//!         let flag = record.flag();
+//!     }
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
 //! ## BQ file format
 //!
 //! A BINSEQ file consists of two sections:
@@ -203,6 +240,6 @@ mod utils;
 mod writer;
 
 pub use header::{BinseqHeader, SIZE_HEADER};
-pub use reader::{MmapReader, RefRecord};
+pub use reader::{MmapReader, RefRecord, StreamReader};
 pub use utils::expected_file_size;
-pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder};
+pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder, StreamWriter, StreamWriterBuilder};
