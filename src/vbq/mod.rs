@@ -125,5 +125,5 @@ mod writer;
 
 pub use header::{BlockHeader, VBinseqHeader};
 pub use index::{BlockIndex, BlockRange};
-pub use reader::{MmapReader, RefRecord};
+pub use reader::{MmapReader, RecordBlock, RecordBlockIter, RefRecord};
 pub use writer::{VBinseqWriter, VBinseqWriterBuilder};
