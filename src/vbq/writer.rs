@@ -59,16 +59,6 @@ use crate::policy::{Policy, RNG_SEED};
 /// # Returns
 ///
 /// The total size in bytes needed to store the record
-///
-/// # Examples
-///
-/// ```
-/// use binseq::vbq::writer::record_byte_size;
-///
-/// // Calculate storage for a single-end read with 2 sequence chunks
-/// let size = record_byte_size(2, 0);
-/// assert_eq!(size, 8 * (2 + 0 + 3)); // 40 bytes
-/// ```
 pub fn record_byte_size(schunk: usize, xchunk: usize) -> usize {
     8 * (schunk + xchunk + 3)
 }
@@ -88,18 +78,8 @@ pub fn record_byte_size(schunk: usize, xchunk: usize) -> usize {
 /// # Returns
 ///
 /// The total size in bytes needed to store the record with quality scores
-///
-/// # Examples
-///
 /// ```
-/// use binseq::vbq::writer::record_byte_size_quality;
-///
-/// // Calculate storage for a single-end read with 2 sequence chunks
-/// // and 12 bases (which will have 12 quality score bytes)
-/// let size = record_byte_size_quality(2, 0, 12, 0);
-/// assert_eq!(size, (8 * (2 + 0 + 3)) + 12); // 52 bytes
-/// ```
-pub fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usize) -> usize {
+fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usize) -> usize {
     record_byte_size(schunk, xchunk) + slen + xlen
 }
 
@@ -1159,10 +1139,6 @@ impl Default for Encoder {
 }
 
 impl Encoder {
-    pub fn new() -> Self {
-        Self::with_policy(Policy::default())
-    }
-
     /// Initialize a new encoder with the given policy.
     pub fn with_policy(policy: Policy) -> Self {
         Self {
@@ -1530,5 +1506,25 @@ mod tests {
         assert!(dest.ingest(&mut source).is_err());
 
         Ok(())
+    }
+
+    #[test]
+    #[allow(clippy::identity_op)]
+    fn test_record_byte_size() {
+        let size = record_byte_size(2, 0);
+        assert_eq!(size, 8 * (2 + 0 + 3)); // 40 bytes
+
+        let size = record_byte_size(4, 8);
+        assert_eq!(size, 8 * (4 + 8 + 3)); // 128 bytes
+    }
+
+    #[test]
+    #[allow(clippy::identity_op)]
+    fn test_record_byte_size_quality() {
+        let size = record_byte_size_quality(2, 0, 12, 0);
+        assert_eq!(size, (8 * (2 + 0 + 3)) + 12); // 52 bytes
+
+        let size = record_byte_size_quality(4, 8, 16, 0);
+        assert_eq!(size, (8 * (4 + 8 + 3)) + 16); // 144 bytes
     }
 }
