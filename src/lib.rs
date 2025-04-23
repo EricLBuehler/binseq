@@ -21,7 +21,7 @@
 //! There are the [`bq`] and [`vbq`] modules, which provide tools for reading and writing `BQ` and `VBQ` files respectively.
 //! Then there are traits and utilities that are ubiquitous across the library which are available at the top-level of the crate.
 //!
-//! # Example
+//! # Example: Memory-mapped Access
 //!
 //! ```
 //! use binseq::Result;
