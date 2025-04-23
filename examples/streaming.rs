@@ -42,7 +42,8 @@ fn main() -> Result<()> {
 
     // Read records one by one
     let mut count = 0;
-    while let Some(record) = reader.next_record()? {
+    while let Some(record) = reader.next_record() {
+        let record = record?;
         println!("Record {}: flag = {}", count, record.flag());
         count += 1;
     }

@@ -510,10 +510,12 @@ impl<R: Read> StreamReader<R> {
     /// * There is an I/O error when reading from the source
     /// * The header has not been read yet
     /// * The data format is invalid
-    pub fn next_record(&mut self) -> Result<Option<RefRecord>> {
+    pub fn next_record(&mut self) -> Option<Result<RefRecord>> {
         // Ensure header is read
         if self.header.is_none() {
-            self.read_header()?;
+            if let Some(e) = self.read_header().err() {
+                return Some(Err(e));
+            }
         }
 
         let config = self
@@ -528,13 +530,14 @@ impl<R: Read> StreamReader<R> {
                 Err(Error::ReadError(ReadError::EndOfStream)) => {
                     // End of stream reached - if we have any partial data, it's an error
                     if self.buffer_len - self.buffer_pos > 0 {
-                        return Err(
-                            ReadError::PartialRecord(self.buffer_len - self.buffer_pos).into()
-                        );
+                        return Some(Err(ReadError::PartialRecord(
+                            self.buffer_len - self.buffer_pos,
+                        )
+                        .into()));
                     }
-                    return Ok(None);
+                    return None;
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Some(Err(e)),
             }
         }
 
@@ -547,7 +550,7 @@ impl<R: Read> StreamReader<R> {
 
         // Create record with incremental ID (based on read position)
         let id = (record_start - SIZE_HEADER) / record_size;
-        Ok(Some(RefRecord::new(id as u64, record_u64s, config)))
+        Some(Ok(RefRecord::new(id as u64, record_u64s, config)))
     }
 
     /// Consumes the stream reader and returns the inner reader

@@ -62,7 +62,8 @@ fn client() -> Result<()> {
 
     // Read records as they arrive
     let mut count = 0;
-    while let Some(record) = reader.next_record()? {
+    while let Some(record) = reader.next_record() {
+        let record = record?;
         println!(
             "Client: Received record {} with flag = {}",
             count,
