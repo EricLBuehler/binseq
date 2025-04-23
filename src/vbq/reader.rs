@@ -140,6 +140,7 @@ impl RecordBlock {
     /// }
     /// ```
     #[must_use]
+    #[allow(clippy::iter_without_into_iter)]
     pub fn iter(&self) -> RecordBlockIter {
         RecordBlockIter::new(self)
     }
@@ -185,7 +186,7 @@ impl RecordBlock {
     /// # Returns
     ///
     /// A `Result` indicating success or an error
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool) -> Result<()> {
+    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool) {
         let mut pos = 0;
         loop {
             // Check that we have enough bytes to at least read the flag
@@ -248,7 +249,6 @@ impl RecordBlock {
                 pos += xlen as usize;
             }
         }
-        Ok(())
     }
 
     fn ingest_compressed_bytes(&mut self, bytes: &[u8], has_quality: bool) -> Result<()> {
@@ -765,7 +765,7 @@ impl MmapReader {
         if self.header.compressed {
             block.ingest_compressed_bytes(block_buffer, self.header.qual)?;
         } else {
-            block.ingest_bytes(block_buffer, self.header.qual)?;
+            block.ingest_bytes(block_buffer, self.header.qual);
         }
 
         // Update the block index
@@ -990,7 +990,7 @@ impl ParallelReader for MmapReader {
                     if header.compressed {
                         record_block.ingest_compressed_bytes(block_data, header.qual)?;
                     } else {
-                        record_block.ingest_bytes(block_data, header.qual)?;
+                        record_block.ingest_bytes(block_data, header.qual);
                     }
 
                     // Update the record block index
