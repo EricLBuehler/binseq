@@ -145,9 +145,8 @@ impl BinseqHeader {
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
-        let reserved = match buffer[13..32].try_into() {
-            Ok(reserved) => reserved,
-            Err(_) => return Err(HeaderError::InvalidReservedBytes.into()),
+        let Ok(reserved) = buffer[13..32].try_into() else {
+            return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
             magic,

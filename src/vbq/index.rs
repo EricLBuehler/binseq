@@ -273,14 +273,16 @@ impl IndexHeader {
         reader.read_exact(&mut buffer)?;
         let magic = LittleEndian::read_u64(&buffer[0..8]);
         let bytes = LittleEndian::read_u64(&buffer[8..16]);
-        let _reserved = &buffer[16..INDEX_HEADER_SIZE]; // Not used but bytes pulled to validate size
+        let Ok(reserved) = buffer[16..INDEX_HEADER_SIZE].try_into() else {
+            return Err(IndexError::InvalidReservedBytes.into());
+        };
         if magic != INDEX_MAGIC {
             return Err(IndexError::InvalidMagicNumber(magic).into());
         }
         Ok(Self {
             magic,
             bytes,
-            reserved: [42; INDEX_HEADER_SIZE - 16],
+            reserved,
         })
     }
     /// Serializes the index header to a binary format and writes it to the provided writer
@@ -541,15 +543,12 @@ impl BlockIndex {
 
     /// Reads an index from a path
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let upstream_file =
-            if let Some(upstream) = path.as_ref().to_str().unwrap().strip_suffix(".vqi") {
-                upstream
-            } else {
-                return Err(IndexError::MissingUpstreamFile(
-                    path.as_ref().to_string_lossy().to_string(),
-                )
-                .into());
-            };
+        let Some(upstream_file) = path.as_ref().to_str().unwrap().strip_suffix(".vqi") else {
+            return Err(IndexError::MissingUpstreamFile(
+                path.as_ref().to_string_lossy().to_string(),
+            )
+            .into());
+        };
         let upstream_handle = File::open(upstream_file)?;
         let mmap = unsafe { memmap2::Mmap::map(&upstream_handle)? };
         let file_size = mmap.len() as u64;

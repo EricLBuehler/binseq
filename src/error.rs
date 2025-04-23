@@ -213,6 +213,10 @@ pub enum IndexError {
     /// The first parameter is the actual file size, the second is the expected size
     #[error("Mismatch in size between upstream size: {0} and expected index size {1}")]
     ByteSizeMismatch(u64, u64),
+
+    /// Invalid reserved bytes in the index header
+    #[error("Invalid reserved bytes in index header")]
+    InvalidReservedBytes,
 }
 impl IndexError {
     /// Checks if this error indicates a mismatch between the index and file
