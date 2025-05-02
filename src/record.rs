@@ -1,3 +1,5 @@
+use auto_impl::auto_impl;
+
 use super::Result;
 
 /// Record trait shared between BINSEQ variants.
@@ -8,6 +10,7 @@ use super::Result;
 /// Implemented by [`bq::RefRecord`](crate::bq::RefRecord) and [`vbq::RefRecord`](crate::vbq::RefRecord).
 ///
 /// Used to interact with [`ParallelProcessor`](crate::ParallelProcessor) for easy parallel processing.
+#[auto_impl(&, &mut)]
 pub trait BinseqRecord {
     /// Returns the global index of the record.
     fn index(&self) -> u64;
