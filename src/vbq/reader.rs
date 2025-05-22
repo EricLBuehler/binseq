@@ -834,6 +834,11 @@ impl MmapReader {
             Ok(index)
         }
     }
+
+    pub fn num_records(&self) -> Result<usize> {
+        let index = self.load_index()?;
+        Ok(index.num_records())
+    }
 }
 
 impl ParallelReader for MmapReader {

@@ -72,7 +72,7 @@ pub struct BlockRange {
     /// (4 bytes in serialized form)
     pub block_records: u32,
 
-    /// Cumulative number of records up to and including this block
+    /// Cumulative number of records up to this block
     ///
     /// This allows efficient determination of which block contains a specific record
     /// by index without scanning through all previous blocks.
@@ -616,5 +616,14 @@ impl BlockIndex {
                 range.start_offset, range.len, range.block_records, range.cumulative_records
             );
         });
+    }
+
+    /// Returns the total number of records in the dataset
+    pub fn num_records(&self) -> usize {
+        self.ranges
+            .iter()
+            .next_back()
+            .map(|r| (r.cumulative_records + r.block_records) as usize)
+            .unwrap_or_default()
     }
 }

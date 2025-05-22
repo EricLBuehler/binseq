@@ -32,6 +32,13 @@ impl BinseqReader {
             Self::Vbq(reader) => reader.is_paired(),
         }
     }
+
+    pub fn num_records(&self) -> Result<usize> {
+        match self {
+            Self::Bq(reader) => Ok(reader.num_records()),
+            Self::Vbq(reader) => reader.num_records(),
+        }
+    }
 }
 impl ParallelReader for BinseqReader {
     fn process_parallel<P: ParallelProcessor + Clone + 'static>(
