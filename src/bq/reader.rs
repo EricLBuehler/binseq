@@ -9,6 +9,7 @@
 
 use std::fs::File;
 use std::io::Read;
+use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -598,9 +599,45 @@ impl ParallelReader for MmapReader {
         processor: P,
         num_threads: usize,
     ) -> Result<()> {
-        // Calculate number of records for each thread
         let num_records = self.num_records();
-        let records_per_thread = num_records.div_ceil(num_threads);
+        self.process_parallel_range(processor, num_threads, 0..num_records)
+    }
+
+    /// Process records in parallel within a specified range
+    ///
+    /// This method allows parallel processing of a subset of records within the file,
+    /// defined by a start and end index. The range is distributed across the specified
+    /// number of threads.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for each record
+    /// * `num_threads` - The number of threads to spawn
+    /// * `range` - The range of record indices to process
+    ///
+    /// # Type Parameters
+    ///
+    /// * `P` - A type that implements `ParallelProcessor` and can be cloned
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If all records were processed successfully
+    /// * `Err(Error)` - If an error occurred during processing
+    fn process_parallel_range<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+        range: Range<usize>,
+    ) -> Result<()> {
+        // Validate range
+        let num_records = self.num_records();
+        if range.start >= num_records || range.end > num_records || range.start >= range.end {
+            return Ok(()); // Nothing to process or invalid range
+        }
+
+        // Calculate number of records for each thread within the range
+        let range_size = range.end - range.start;
+        let records_per_thread = range_size.div_ceil(num_threads);
 
         // Arc self
         let reader = Arc::new(self);
@@ -613,8 +650,12 @@ impl ParallelReader for MmapReader {
             processor.set_tid(tid);
 
             let handle = std::thread::spawn(move || -> Result<()> {
-                let start_idx = tid * records_per_thread;
-                let end_idx = (start_idx + records_per_thread).min(num_records);
+                let start_idx = range.start + tid * records_per_thread;
+                let end_idx = (start_idx + records_per_thread).min(range.end);
+
+                if start_idx >= end_idx {
+                    return Ok(()); // No records for this thread
+                }
 
                 for (batch_idx, idx) in (start_idx..end_idx).enumerate() {
                     let record = reader.get(idx)?;

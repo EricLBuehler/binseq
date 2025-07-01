@@ -55,3 +55,12 @@ jobs:
         run: cargo run --release --example grep ./data/subset.bq
       - name: run example vbq
         run: cargo run --release --example grep ./data/subset.vbq
+
+  example_range:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: run example (bq)
+        run: cargo run --release --example parallel_range -- ./data/subset.bq 4 30 200
+      - name: run example (vbq)
+        run: cargo run --release --example parallel_range -- ./data/subset.vbq 4 30 200
