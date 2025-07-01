@@ -1,6 +1,8 @@
+use std::fs::File;
+use std::io::Read;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::{fs::File, io::Read};
 
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
@@ -944,17 +946,64 @@ impl ParallelReader for MmapReader {
         processor: P,
         num_threads: usize,
     ) -> Result<()> {
+        let num_records = self.num_records()?;
+        self.process_parallel_range(processor, num_threads, 0..num_records)
+    }
+
+    /// Process records in parallel within a specified range
+    ///
+    /// This method allows parallel processing of a subset of records within the file,
+    /// defined by a start and end index. The method maps the record range to the
+    /// appropriate blocks and processes only the records within the specified range.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for each record
+    /// * `num_threads` - The number of threads to spawn
+    /// * `start` - The starting record index (inclusive)
+    /// * `end` - The ending record index (exclusive)
+    ///
+    /// # Type Parameters
+    ///
+    /// * `P` - A type that implements `ParallelProcessor` and can be cloned
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If all records were processed successfully
+    /// * `Err(Error)` - If an error occurred during processing
+    fn process_parallel_range<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+        range: Range<usize>,
+    ) -> Result<()> {
         // Generate or load the index first
         let index = self.load_index()?;
 
-        // Get the number of blocks
-        let n_blocks = index.n_blocks();
-        if n_blocks == 0 {
-            return Ok(()); // Nothing to process
+        // Validate range
+        let total_records = self.num_records()?;
+        if range.start >= total_records || range.end > total_records || range.start >= range.end {
+            return Ok(()); // Nothing to process or invalid range
         }
 
-        // Calculate block assignments
-        let blocks_per_thread = n_blocks.div_ceil(num_threads);
+        // Find blocks that contain records in the specified range
+        let relevant_blocks = index
+            .ranges()
+            .iter()
+            .filter(|r| {
+                let iv_start = r.cumulative_records as usize;
+                let iv_end = (r.cumulative_records + r.block_records) as usize;
+                iv_start < range.end && iv_end > range.start
+            })
+            .copied()
+            .collect::<Vec<_>>();
+
+        if relevant_blocks.is_empty() {
+            return Ok(()); // No relevant blocks
+        }
+
+        // Calculate block assignments for threads
+        let blocks_per_thread = relevant_blocks.len().div_ceil(num_threads);
 
         // Create shared resources
         let mmap = Arc::clone(&self.mmap);
@@ -965,9 +1014,11 @@ impl ParallelReader for MmapReader {
 
         for thread_id in 0..num_threads {
             // Calculate this thread's block range
-            let start_block = thread_id * blocks_per_thread;
-            let end_block = std::cmp::min((thread_id + 1) * blocks_per_thread, n_blocks);
-            if start_block > n_blocks {
+            let start_block_idx = thread_id * blocks_per_thread;
+            let end_block_idx =
+                std::cmp::min((thread_id + 1) * blocks_per_thread, relevant_blocks.len());
+
+            if start_block_idx >= relevant_blocks.len() {
                 continue;
             }
 
@@ -976,14 +1027,15 @@ impl ParallelReader for MmapReader {
             proc.set_tid(thread_id);
 
             // Get block ranges for this thread
-            let blocks: Vec<BlockRange> = index.ranges()[start_block..end_block].to_vec();
+            let thread_blocks: Vec<BlockRange> =
+                relevant_blocks[start_block_idx..end_block_idx].to_vec();
 
             let handle = std::thread::spawn(move || -> Result<()> {
                 // Create block to reuse for processing (within thread)
                 let mut record_block = RecordBlock::new(header.block as usize);
 
                 // Process each assigned block
-                for block_range in blocks {
+                for block_range in thread_blocks {
                     // Clear the block for reuse
                     record_block.clear();
 
@@ -1001,9 +1053,14 @@ impl ParallelReader for MmapReader {
                     // Update the record block index
                     record_block.update_index(block_range.cumulative_records as usize);
 
-                    // Process each record in the block
+                    // Process records in this block that fall within our range
                     for record in record_block.iter() {
-                        proc.process_record(record)?;
+                        let global_record_idx = record.index as usize;
+
+                        // Only process records within our specified range
+                        if global_record_idx >= range.start && global_record_idx < range.end {
+                            proc.process_record(record)?;
+                        }
                     }
 
                     // Signal batch completion
