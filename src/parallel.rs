@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::Path;
 
 use crate::{bq, error::ExtensionError, vbq, BinseqRecord, Result};
@@ -39,6 +40,35 @@ impl BinseqReader {
             Self::Vbq(reader) => reader.num_records(),
         }
     }
+
+    /// Process records in parallel within a specified range
+    ///
+    /// This method allows parallel processing of a subset of records within the file,
+    /// defined by a start and end index. The range is distributed across the specified
+    /// number of threads.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for each record
+    /// * `num_threads` - The number of threads to spawn
+    /// * `start` - The starting record index (inclusive)
+    /// * `end` - The ending record index (exclusive)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If all records were processed successfully
+    /// * `Err(Error)` - If an error occurred during processing
+    pub fn process_parallel_range<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+        range: Range<usize>,
+    ) -> Result<()> {
+        match self {
+            Self::Bq(reader) => reader.process_parallel_range(processor, num_threads, range),
+            Self::Vbq(reader) => reader.process_parallel_range(processor, num_threads, range),
+        }
+    }
 }
 impl ParallelReader for BinseqReader {
     fn process_parallel<P: ParallelProcessor + Clone + 'static>(
@@ -46,9 +76,19 @@ impl ParallelReader for BinseqReader {
         processor: P,
         num_threads: usize,
     ) -> Result<()> {
+        let num_records = self.num_records()?;
+        self.process_parallel_range(processor, num_threads, 0..num_records)
+    }
+
+    fn process_parallel_range<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+        range: Range<usize>,
+    ) -> Result<()> {
         match self {
-            Self::Bq(reader) => reader.process_parallel(processor, num_threads),
-            Self::Vbq(reader) => reader.process_parallel(processor, num_threads),
+            Self::Bq(reader) => reader.process_parallel_range(processor, num_threads, range),
+            Self::Vbq(reader) => reader.process_parallel_range(processor, num_threads, range),
         }
     }
 }
@@ -62,6 +102,29 @@ pub trait ParallelReader {
         self,
         processor: P,
         num_threads: usize,
+    ) -> Result<()>;
+
+    /// Process records in parallel within a specified range
+    ///
+    /// This method allows parallel processing of a subset of records within the file,
+    /// defined by a start and end index. The range is distributed across the specified
+    /// number of threads.
+    ///
+    /// # Arguments
+    ///
+    /// * `processor` - The processor to use for each record
+    /// * `num_threads` - The number of threads to spawn
+    /// * `range` - The range of record indices to process
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If all records were processed successfully
+    /// * `Err(Error)` - If an error occurred during processing
+    fn process_parallel_range<P: ParallelProcessor + Clone + 'static>(
+        self,
+        processor: P,
+        num_threads: usize,
+        range: Range<usize>,
     ) -> Result<()>;
 }
 
