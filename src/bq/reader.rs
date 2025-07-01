@@ -629,6 +629,13 @@ impl ParallelReader for MmapReader {
         num_threads: usize,
         range: Range<usize>,
     ) -> Result<()> {
+        // Calculate the number of threads to use
+        let num_threads = if num_threads == 0 {
+            num_cpus::get()
+        } else {
+            num_threads.min(num_cpus::get())
+        };
+
         // Validate range
         let num_records = self.num_records();
         if range.start >= num_records || range.end > num_records || range.start >= range.end {
