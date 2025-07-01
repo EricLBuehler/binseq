@@ -17,6 +17,7 @@ bitnuc = "0.2.11"
 bytemuck = "1.21.0"
 byteorder = "1.5.0"
 memmap2 = "0.9.5"
+num_cpus = "1.17.0"
 rand = { version = "0.9.1", features = ["small_rng"] }
 thiserror = "2.0.8"
 zstd = { version = "0.13.3", features = ["zstdmt"] }
