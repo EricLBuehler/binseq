@@ -31,8 +31,11 @@ use crate::{
 /// # Returns
 ///
 /// The number of 64-bit words required to encode the sequence
-fn encoded_sequence_len(len: u64) -> usize {
-    len.div_ceil(32) as usize
+fn encoded_sequence_len(len: u64, bitsize: BitSize) -> usize {
+    match bitsize {
+        BitSize::Two => len.div_ceil(32) as usize,
+        BitSize::Four => len.div_ceil(16) as usize,
+    }
 }
 
 /// A container for a block of VBINSEQ records
@@ -230,7 +233,7 @@ impl RecordBlock {
 
             // Add the primary sequence to the block
             let mut seq = [0u8; 8];
-            for _ in 0..encoded_sequence_len(slen) {
+            for _ in 0..encoded_sequence_len(slen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -244,7 +247,7 @@ impl RecordBlock {
             }
 
             // Add the extended sequence to the block
-            for _ in 0..encoded_sequence_len(xlen) {
+            for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -294,7 +297,7 @@ impl RecordBlock {
             self.lens.push(xlen);
 
             // Read the sequence and advance the position
-            let schunk = encoded_sequence_len(slen);
+            let schunk = encoded_sequence_len(slen, self.bitsize);
             let schunk_bytes = schunk * 8;
             self.rbuf.resize(schunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..schunk_bytes])?;
@@ -315,7 +318,7 @@ impl RecordBlock {
             }
 
             // Read the sequence and advance the position
-            let xchunk = encoded_sequence_len(xlen);
+            let xchunk = encoded_sequence_len(xlen, self.bitsize);
             let xchunk_bytes = xchunk * 8;
             self.rbuf.resize(xchunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
@@ -367,8 +370,8 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         let flag = self.block.flags[self.rpos];
         let slen = self.block.lens[2 * self.rpos];
         let xlen = self.block.lens[(2 * self.rpos) + 1];
-        let schunk = encoded_sequence_len(slen);
-        let xchunk = encoded_sequence_len(xlen);
+        let schunk = encoded_sequence_len(slen, self.block.bitsize);
+        let xchunk = encoded_sequence_len(xlen, self.block.bitsize);
 
         let s_seq = &self.block.sequences[self.epos..self.epos + schunk];
         let s_qual = if self.block.qualities.is_empty() {
