@@ -54,10 +54,15 @@ pub struct BinseqHeader {
     /// 4 bytes
     pub xlen: u32,
 
+    /// Number of bits per nucleotide (currently 2 or 4)
+    ///
+    /// 1 byte
+    pub bits: u8,
+
     /// Reserve remaining bytes for future use
     ///
-    /// 19 bytes
-    pub reserved: [u8; 19],
+    /// 18 bytes
+    pub reserved: [u8; 18],
 }
 impl BinseqHeader {
     /// Creates a new header with the specified sequence length
@@ -80,7 +85,8 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen: 0,
-            reserved: [42; 19],
+            bits: 2,
+            reserved: [42; 18],
         }
     }
 
@@ -104,8 +110,14 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen,
-            reserved: [42; 19],
+            bits: 2,
+            reserved: [42; 18],
         }
+    }
+
+    /// Sets the bitsize of the header
+    pub fn set_bitsize(&mut self, bits: u8) {
+        self.bits = bits;
     }
 
     /// Checks if the file is paired
@@ -145,7 +157,12 @@ impl BinseqHeader {
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
-        let Ok(reserved) = buffer[13..32].try_into() else {
+        let bits = match buffer[13] {
+            0 | 2 | 42 => 2,
+            4 => 4,
+            x => return Err(HeaderError::InvalidBitSize(x).into()),
+        };
+        let Ok(reserved) = buffer[14..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -153,6 +170,7 @@ impl BinseqHeader {
             format,
             slen,
             xlen,
+            bits,
             reserved,
         })
     }
@@ -209,7 +227,8 @@ impl BinseqHeader {
         buffer[4] = self.format;
         LittleEndian::write_u32(&mut buffer[5..9], self.slen);
         LittleEndian::write_u32(&mut buffer[9..13], self.xlen);
-        buffer[13..32].copy_from_slice(&self.reserved);
+        buffer[13] = self.bits;
+        buffer[14..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

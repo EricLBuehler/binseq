@@ -54,7 +54,7 @@ pub const BLOCK_SIZE: u64 = 128 * 1024;
 /// Reserved bytes for future use in the file header (16 bytes)
 ///
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
-pub const RESERVED_BYTES: [u8; 16] = [42; 16];
+pub const RESERVED_BYTES: [u8; 15] = [42; 15];
 
 /// Reserved bytes for future use in block headers (12 bytes)
 ///
@@ -109,10 +109,13 @@ pub struct VBinseqHeader {
     /// If true, each record has both primary and extended sequences (1 byte)
     pub paired: bool,
 
+    /// The bitsize of the sequence data (1 byte)
+    pub bits: u8,
+
     /// Reserved bytes for future format extensions
     ///
     /// Currently filled with placeholder values (16 bytes)
-    pub reserved: [u8; 16],
+    pub reserved: [u8; 15],
 }
 impl Default for VBinseqHeader {
     /// Creates a default header with default block size and all features disabled
@@ -174,6 +177,7 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
+            bits: 2,
             reserved: RESERVED_BYTES,
         }
     }
@@ -209,7 +213,12 @@ impl VBinseqHeader {
         let qual = buffer[13] != 0;
         let compressed = buffer[14] != 0;
         let paired = buffer[15] != 0;
-        let Ok(reserved) = buffer[16..32].try_into() else {
+        let bits = match buffer[16] {
+            0 | 2 | 42 => 2,
+            4 => 4,
+            x => return Err(HeaderError::InvalidBitSize(x).into()),
+        };
+        let Ok(reserved) = buffer[17..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -219,6 +228,7 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
+            bits,
             reserved,
         })
     }
@@ -247,7 +257,8 @@ impl VBinseqHeader {
         buffer[13] = self.qual.into();
         buffer[14] = self.compressed.into();
         buffer[15] = self.paired.into();
-        buffer[16..32].copy_from_slice(&self.reserved);
+        buffer[16] = self.bits;
+        buffer[17..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

@@ -302,7 +302,7 @@ impl<W: Write> VBinseqWriter<W> {
         let mut wtr = Self {
             inner,
             header,
-            encoder: Encoder::with_policy(policy),
+            encoder: Encoder::with_policy(header.bits, policy),
             cblock: BlockWriter::new(header.block as usize, header.compressed),
         };
         if !headless {
@@ -1120,6 +1120,9 @@ impl BlockWriter {
 /// Encapsulates the logic for encoding sequences into a binary format.
 #[derive(Clone)]
 pub struct Encoder {
+    /// Bitsize of the nucleotides
+    bitsize: u8,
+
     /// Reusable buffers for all nucleotides (written as 2-bit after conversion)
     sbuffer: Vec<u64>,
     xbuffer: Vec<u64>,
@@ -1135,16 +1138,11 @@ pub struct Encoder {
     rng: SmallRng,
 }
 
-impl Default for Encoder {
-    fn default() -> Self {
-        Self::with_policy(Policy::default())
-    }
-}
-
 impl Encoder {
     /// Initialize a new encoder with the given policy.
-    pub fn with_policy(policy: Policy) -> Self {
+    pub fn with_policy(bitsize: u8, policy: Policy) -> Self {
         Self {
+            bitsize,
             policy,
             sbuffer: Vec::default(),
             xbuffer: Vec::default(),
@@ -1158,15 +1156,21 @@ impl Encoder {
     ///
     /// Will return `None` if the sequence is invalid and the policy does not allow correction.
     pub fn encode_single(&mut self, primary: &[u8]) -> Result<Option<&[u64]>> {
-        // Fill the buffer with the 2-bit representation of the nucleotides
+        let encode_func = match self.bitsize {
+            2 | 42 => bitnuc::twobit::encode,
+            4 => bitnuc::fourbit::encode,
+            x => return Err(WriteError::UnsupportedBitSize(x).into()),
+        };
+
+        // Fill the buffer with the bit representation of the nucleotides
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err() {
+        if encode_func(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -1182,9 +1186,15 @@ impl Encoder {
         primary: &[u8],
         extended: &[u8],
     ) -> Result<Option<(&[u64], &[u64])>> {
+        let encode_func = match self.bitsize {
+            2 | 42 => bitnuc::twobit::encode,
+            4 => bitnuc::fourbit::encode,
+            x => return Err(WriteError::UnsupportedBitSize(x).into()),
+        };
+
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err()
-            || bitnuc::encode(extended, &mut self.xbuffer).is_err()
+        if encode_func(primary, &mut self.sbuffer).is_err()
+            || encode_func(extended, &mut self.xbuffer).is_err()
         {
             self.clear();
             if self
@@ -1194,8 +1204,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
+                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
+                encode_func(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }

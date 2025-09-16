@@ -68,6 +68,9 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
+    fn bitsize(&self) -> u8 {
+        self.config.bitsize
+    }
     fn index(&self) -> u64 {
         self.id
     }
@@ -106,6 +109,8 @@ pub struct RecordConfig {
     /// The number of u64 chunks needed to store the extended sequence
     /// (each u64 stores 32 values)
     xchunk: u64,
+    /// The bitsize of the record
+    bitsize: u8,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -117,16 +122,18 @@ impl RecordConfig {
     ///
     /// * `slen` - The length of primary sequences in the file
     /// * `xlen` - The length of secondary/extended sequences in the file
+    /// * `bitsize` - The bitsize of the record
     ///
     /// # Returns
     ///
     /// A new `RecordConfig` instance with the specified sequence lengths
-    pub fn new(slen: usize, xlen: usize) -> Self {
+    pub fn new(slen: usize, xlen: usize, bitsize: u8) -> Self {
         Self {
             slen: slen as u64,
             xlen: xlen as u64,
             schunk: (slen as u64).div_ceil(32),
             xchunk: (xlen as u64).div_ceil(32),
+            bitsize,
         }
     }
 
@@ -143,7 +150,7 @@ impl RecordConfig {
     ///
     /// A new `RecordConfig` instance with the sequence lengths from the header
     pub fn from_header(header: &BinseqHeader) -> Self {
-        Self::new(header.slen as usize, header.xlen as usize)
+        Self::new(header.slen as usize, header.xlen as usize, header.bits)
     }
 
     /// Returns whether this record contains extended sequence data

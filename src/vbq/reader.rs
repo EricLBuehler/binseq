@@ -52,6 +52,9 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// let mut block = reader.new_block(); // Create a block with appropriate size
 /// ```
 pub struct RecordBlock {
+    /// Bitsize of the records in the block
+    bitsize: u8,
+
     /// Index of the first record in the block
     /// This allows records to maintain their global position in the file
     index: usize,
@@ -89,14 +92,16 @@ impl RecordBlock {
     ///
     /// # Parameters
     ///
+    /// * `bitsize` - Bitsize of the records in the block
     /// * `block_size` - Maximum size of the block in bytes
     ///
     /// # Returns
     ///
     /// A new empty `RecordBlock` instance
     #[must_use]
-    pub fn new(block_size: usize) -> Self {
+    pub fn new(bitsize: u8, block_size: usize) -> Self {
         Self {
+            bitsize,
             index: 0,
             flags: Vec::new(),
             lens: Vec::new(),
@@ -384,7 +389,15 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         self.rpos += 1;
 
         Some(RefRecord::new(
-            index, flag, slen, xlen, s_seq, x_seq, s_qual, x_qual,
+            self.block.bitsize,
+            index,
+            flag,
+            slen,
+            xlen,
+            s_seq,
+            x_seq,
+            s_qual,
+            x_qual,
         ))
     }
 }
@@ -434,6 +447,9 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 /// }
 /// ```
 pub struct RefRecord<'a> {
+    /// Bitsize of the record
+    bitsize: u8,
+
     /// Global index of this record within the file
     index: u64,
 
@@ -462,6 +478,7 @@ impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
+        bitsize: u8,
         index: u64,
         flag: u64,
         slen: u64,
@@ -472,6 +489,7 @@ impl<'a> RefRecord<'a> {
         xqual: &'a [u8],
     ) -> Self {
         Self {
+            bitsize,
             index,
             flag,
             slen,
@@ -485,6 +503,9 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
+    fn bitsize(&self) -> u8 {
+        self.bitsize
+    }
     fn index(&self) -> u64 {
         self.index
     }
@@ -508,10 +529,6 @@ impl BinseqRecord for RefRecord<'_> {
     }
     fn xqual(&self) -> &[u8] {
         self.xqual
-    }
-    fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf, self.xlen as usize, dbuf)?;
-        Ok(())
     }
 }
 
@@ -642,7 +659,7 @@ impl MmapReader {
     /// ```
     #[must_use]
     pub fn new_block(&self) -> RecordBlock {
-        RecordBlock::new(self.header.block as usize)
+        RecordBlock::new(self.header.bits, self.header.block as usize)
     }
 
     /// Returns the path where the index file would be located
@@ -1039,7 +1056,7 @@ impl ParallelReader for MmapReader {
 
             let handle = std::thread::spawn(move || -> Result<()> {
                 // Create block to reuse for processing (within thread)
-                let mut record_block = RecordBlock::new(header.block as usize);
+                let mut record_block = RecordBlock::new(header.bits, header.block as usize);
 
                 // Process each assigned block
                 for block_range in thread_blocks {

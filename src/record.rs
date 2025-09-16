@@ -1,5 +1,7 @@
 use auto_impl::auto_impl;
 
+use crate::error::RecordError;
+
 use super::Result;
 
 /// Record trait shared between BINSEQ variants.
@@ -12,6 +14,9 @@ use super::Result;
 /// Used to interact with [`ParallelProcessor`](crate::ParallelProcessor) for easy parallel processing.
 #[auto_impl(&, &mut)]
 pub trait BinseqRecord {
+    /// Returns the bitsize of the record (number of bits per nucleotide)
+    fn bitsize(&self) -> u8;
+
     /// Returns the global index of the record.
     fn index(&self) -> u64;
 
@@ -48,13 +53,21 @@ pub trait BinseqRecord {
 
     /// Decodes the primary sequence of this record into the provided buffer.
     fn decode_s(&self, buf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.sbuf(), self.slen() as usize, buf)?;
+        match self.bitsize() {
+            2 => bitnuc::twobit::decode(self.sbuf(), self.slen() as usize, buf)?,
+            4 => bitnuc::fourbit::decode(self.sbuf(), self.slen() as usize, buf)?,
+            x => return Err(RecordError::InvalidBitsize(x).into()),
+        }
         Ok(())
     }
 
     /// Decodes the extended sequence of this record into the provided buffer.
     fn decode_x(&self, buf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf(), self.xlen() as usize, buf)?;
+        match self.bitsize() {
+            2 => bitnuc::twobit::decode(self.xbuf(), self.xlen() as usize, buf)?,
+            4 => bitnuc::fourbit::decode(self.xbuf(), self.xlen() as usize, buf)?,
+            x => return Err(RecordError::InvalidBitsize(x).into()),
+        }
         Ok(())
     }
 
