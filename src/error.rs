@@ -22,6 +22,10 @@ pub enum Error {
     #[error("Error processing Index: {0}")]
     IndexError(#[from] IndexError),
 
+    /// Errors related to record operations
+    #[error("Error processing Record: {0}")]
+    RecordError(#[from] RecordError),
+
     /// Standard I/O errors
     #[error("Error with IO: {0}")]
     IoError(#[from] std::io::Error),
@@ -35,7 +39,7 @@ pub enum Error {
 
     /// Errors from the bitnuc dependency for nucleotide encoding/decoding
     #[error("Bitnuc error: {0}")]
-    BitnucError(#[from] bitnuc::NucleotideError),
+    BitnucError(#[from] bitnuc::Error),
 
     /// Generic errors for other unexpected situations
     #[error("Generic error: {0}")]
@@ -80,6 +84,10 @@ pub enum HeaderError {
     /// The reserved bytes in the header contain unexpected values
     #[error("Invalid reserved bytes")]
     InvalidReservedBytes,
+
+    /// The bits in the header contain unexpected values
+    #[error("Invalid bit size found in header: {0} - expecting [2,4]")]
+    InvalidBitSize(u8),
 
     /// The size of the data does not match what was specified in the header
     ///
@@ -159,6 +167,13 @@ pub enum WriteError {
     /// * `String` - Description of the invalid nucleotides found
     #[error("Invalid nucleotides found in sequence: {0}")]
     InvalidNucleotideSequence(String),
+
+    /// The header specifies an unsupported bit size for encoding nucleotides
+    ///
+    /// # Arguments
+    /// * `u8` - The unsupported bit size
+    #[error("Unsupported bit size for nucleotide encoding: {0} - Expected 2 or 4")]
+    UnsupportedBitSize(u8),
 
     /// Attempted to write data without first setting up the header
     #[error("Missing header in writer builder")]
@@ -249,4 +264,11 @@ pub enum ExtensionError {
     /// When the extension is not supported
     #[error("Unsupported extension in path: {0}")]
     UnsupportedExtension(String),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RecordError {
+    /// Invalid bitsize in the record
+    #[error("Invalid bitsize in record: {0}")]
+    InvalidBitsize(u8),
 }
