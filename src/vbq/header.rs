@@ -414,6 +414,19 @@ impl BlockHeader {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            magic: BLOCK_MAGIC,
+            size: 0,
+            records: 0,
+            reserved: RESERVED_BYTES_BLOCK,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size == 0 && self.records == 0
+    }
+
     /// Writes the block header to a writer
     ///
     /// This function serializes the block header structure into a 32-byte buffer and writes
@@ -464,5 +477,9 @@ impl BlockHeader {
         let size = LittleEndian::read_u64(&buffer[8..16]);
         let records = LittleEndian::read_u32(&buffer[16..20]);
         Ok(Self::new(size, records))
+    }
+
+    pub fn size_with_header(&self) -> usize {
+        self.size as usize + SIZE_BLOCK_HEADER
     }
 }

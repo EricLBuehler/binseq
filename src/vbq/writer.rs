@@ -44,6 +44,9 @@ use zstd::Encoder as ZstdEncoder;
 use super::header::{BlockHeader, VBinseqHeader};
 use crate::error::{Result, WriteError};
 use crate::policy::{Policy, RNG_SEED};
+use crate::vbq::header::{SIZE_BLOCK_HEADER, SIZE_HEADER};
+use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC};
+use crate::vbq::{BlockIndex, BlockRange};
 
 /// Calculates the storage size in bytes required for a record without quality scores
 ///
@@ -309,6 +312,15 @@ pub struct VBinseqWriter<W: Write> {
 
     /// Pre-initialized writer for compressed blocks
     cblock: BlockWriter,
+
+    /// Growable buffer for the block ranges found
+    ranges: Vec<BlockRange>,
+
+    /// Total bytes written to this writer
+    bytes_written: usize,
+
+    /// Total records written to this writer
+    records_written: usize,
 }
 impl<W: Write> VBinseqWriter<W> {
     pub fn new(inner: W, header: VBinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
@@ -317,6 +329,9 @@ impl<W: Write> VBinseqWriter<W> {
             header,
             encoder: Encoder::with_policy(header.bits, policy),
             cblock: BlockWriter::new(header.block as usize, header.compressed),
+            ranges: Vec::new(),
+            bytes_written: 0,
+            records_written: 0,
         };
         if !headless {
             wtr.init()?;
@@ -335,6 +350,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// * `Err(_)` - If an error occurred during writing
     fn init(&mut self) -> Result<()> {
         self.header.write_bytes(&mut self.inner)?;
+        self.bytes_written += SIZE_HEADER;
         Ok(())
     }
 
@@ -457,7 +473,13 @@ impl<W: Write> VBinseqWriter<W> {
         if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
             let record_size = record_byte_size(sbuffer.len(), 0);
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, and sequence to the block
@@ -538,7 +560,13 @@ impl<W: Write> VBinseqWriter<W> {
             // Check if the current block can handle the next record
             let record_size = record_byte_size(sbuffer.len(), xbuffer.len());
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, and sequence to the block
@@ -627,7 +655,13 @@ impl<W: Write> VBinseqWriter<W> {
             // Check if the current block can handle the next record
             let record_size = record_byte_size_quality(sbuffer.len(), 0, quality.len(), 0);
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, sequence, and quality scores to the block
@@ -730,7 +764,13 @@ impl<W: Write> VBinseqWriter<W> {
             let record_size =
                 record_byte_size_quality(sbuffer.len(), xbuffer.len(), s_qual.len(), x_qual.len());
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, sequence, and quality scores to the block
@@ -785,8 +825,15 @@ impl<W: Write> VBinseqWriter<W> {
     /// }
     /// ```
     pub fn finish(&mut self) -> Result<()> {
-        self.cblock.flush(&mut self.inner)?;
+        impl_flush_block(
+            &mut self.inner,
+            &mut self.cblock,
+            &mut self.ranges,
+            &mut self.bytes_written,
+            &mut self.records_written,
+        )?;
         self.inner.flush()?;
+        self.write_index()?;
         Ok(())
     }
 
@@ -858,12 +905,93 @@ impl<W: Write> VBinseqWriter<W> {
             other.by_ref().clear();
         }
 
+        // Pull the ranges from the other writer and update their statistics
+        {
+            for range in other.ranges.drain(..) {
+                // Build the updated range with main-file specific information
+                let updated_range = BlockRange::new(
+                    self.bytes_written as u64, // Current position in main file
+                    range.len,
+                    range.block_records,
+                    self.records_written as u32, // Current number of records written in main file
+                );
+
+                self.ranges.push(updated_range);
+
+                // Update counters incrementally for each range
+                self.bytes_written += (range.len + SIZE_BLOCK_HEADER as u64) as usize;
+                self.records_written += range.block_records as usize;
+            }
+
+            // reset the other writer
+            other.bytes_written = 0;
+            other.records_written = 0;
+        }
+
         // Ingest incomplete block from other
         {
-            self.cblock.ingest(other.cblock_mut(), &mut self.inner)?;
+            let header = self.cblock.ingest(other.cblock_mut(), &mut self.inner)?;
+            if !header.is_empty() {
+                let range = BlockRange::new(
+                    self.bytes_written as u64,
+                    header.size,
+                    header.records,
+                    self.records_written as u32,
+                );
+                self.ranges.push(range);
+                self.bytes_written += header.size_with_header();
+                self.records_written += header.records as usize;
+            }
         }
         Ok(())
     }
+
+    pub fn write_index(&mut self) -> Result<()> {
+        // Build the index
+        let index_header = IndexHeader::new(self.bytes_written as u64);
+        let block_index = BlockIndex {
+            header: index_header,
+            ranges: self.ranges.clone(),
+        };
+
+        // Write the index to a temporary buffer
+        let mut buffer = Vec::new();
+        block_index.write_bytes(&mut buffer)?;
+
+        // Determine the number of bytes written to the buffer
+        let n_bytes = buffer.len() as u64;
+
+        // Write the index to the underlying writer
+        self.inner.write_all(&buffer)?;
+
+        // Write the number of bytes written to the index
+        self.inner.write_u64::<LittleEndian>(n_bytes)?;
+
+        // Write the index footer magic
+        self.inner.write_u64::<LittleEndian>(INDEX_END_MAGIC)?;
+
+        Ok(())
+    }
+}
+
+fn impl_flush_block<W: Write>(
+    writer: &mut W,
+    cblock: &mut BlockWriter,
+    ranges: &mut Vec<BlockRange>,
+    bytes_written: &mut usize,
+    records_written: &mut usize,
+) -> Result<()> {
+    let block_header = cblock.flush(writer)?;
+    let range = BlockRange::new(
+        *bytes_written as u64,
+        block_header.size,
+        block_header.records,
+        *records_written as u32,
+    );
+    ranges.push(range);
+    *bytes_written += block_header.size_with_header();
+    *records_written += block_header.records as usize;
+    Ok(())
 }
 
 impl<W: Write> Drop for VBinseqWriter<W> {
@@ -981,7 +1109,7 @@ impl BlockWriter {
         Ok(())
     }
 
-    fn flush_compressed<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush_compressed<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Encode the block
         let mut encoder = ZstdEncoder::new(&mut self.zbuf, self.level)?;
         encoder.write_all(&self.ubuf)?;
@@ -994,10 +1122,10 @@ impl BlockWriter {
         header.write_bytes(inner)?;
         inner.write_all(&self.zbuf)?;
 
-        Ok(())
+        Ok(header)
     }
 
-    fn flush_uncompressed<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush_uncompressed<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Build a block header (this is static in size in the uncompressed case)
         let header = BlockHeader::new(self.block_size as u64, self.starts.len() as u32);
 
@@ -1005,13 +1133,13 @@ impl BlockWriter {
         header.write_bytes(inner)?;
         inner.write_all(&self.ubuf)?;
 
-        Ok(())
+        Ok(header)
     }
 
-    fn flush<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Skip if the block is empty
         if self.pos == 0 {
-            return Ok(());
+            return Ok(BlockHeader::empty());
         }
 
         // Finish out the block with padding
@@ -1019,16 +1147,16 @@ impl BlockWriter {
         self.ubuf.write_all(&self.padding[..bytes_to_next_start])?;
 
         // Flush the block (implemented differently based on compression)
-        if self.compress {
-            self.flush_compressed(inner)?;
+        let header = if self.compress {
+            self.flush_compressed(inner)
         } else {
-            self.flush_uncompressed(inner)?;
-        }
+            self.flush_uncompressed(inner)
+        }?;
 
         // Reset the position and buffers
         self.clear();
 
-        Ok(())
+        Ok(header)
     }
 
     fn clear(&mut self) {
@@ -1045,7 +1173,7 @@ impl BlockWriter {
     ///
     /// I.e. the bytes can either all fit directly into self.ubuf or an intermediate
     /// flush step is required.
-    fn ingest<W: Write>(&mut self, other: &mut Self, inner: &mut W) -> Result<()> {
+    fn ingest<W: Write>(&mut self, other: &mut Self, inner: &mut W) -> Result<BlockHeader> {
         if self.block_size != other.block_size {
             return Err(
                 WriteError::IncompatibleBlockSizes(self.block_size, other.block_size).into(),
@@ -1056,11 +1184,13 @@ impl BlockWriter {
 
         // Quick ingestion (take all without flush)
         if other.pos <= remaining {
-            self.ingest_all(other)
+            self.ingest_all(other)?;
+            Ok(BlockHeader::empty())
         } else {
             self.ingest_subset(other)?;
-            self.flush(inner)?;
-            self.ingest_all(other)
+            let header = self.flush(inner)?;
+            self.ingest_all(other)?;
+            Ok(header)
         }
     }
 
