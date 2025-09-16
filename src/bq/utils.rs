@@ -4,6 +4,8 @@
 //! calculating file sizes and other utility operations related to
 //! binary sequence files.
 
+use bitnuc::BitSize;
+
 use super::header::SIZE_HEADER;
 
 /// Calculates the expected size in bytes of a binary sequence file
@@ -31,15 +33,19 @@ use super::header::SIZE_HEADER;
 ///
 /// ```
 /// use binseq::bq::expected_file_size;
+/// use binseq::BitSize;
 ///
 /// // For 1000 sequences of length 100
-/// let size = expected_file_size(1000, 100);
+/// let size = expected_file_size(1000, 100, BitSize::Two);
 /// assert!(size > 0);
 /// ```
 #[must_use]
-pub fn expected_file_size(num_records: usize, seq_len: usize) -> usize {
+pub fn expected_file_size(num_records: usize, seq_len: usize, bitsize: BitSize) -> usize {
     // number of u64 chunks in the sequence
-    let n_chunks = seq_len.div_ceil(32);
+    let n_chunks = match bitsize {
+        BitSize::Two => seq_len.div_ceil(32),
+        BitSize::Four => seq_len.div_ceil(16),
+    };
 
     // flag + sequence (8 bytes per chunk + 8 bytes for the flag)
     let record_size = 8 * (n_chunks + 1);

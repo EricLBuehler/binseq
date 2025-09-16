@@ -129,11 +129,15 @@ impl RecordConfig {
     ///
     /// A new `RecordConfig` instance with the specified sequence lengths
     pub fn new(slen: usize, xlen: usize, bitsize: BitSize) -> Self {
+        let (schunk, xchunk) = match bitsize {
+            BitSize::Two => (slen.div_ceil(32), xlen.div_ceil(32)),
+            BitSize::Four => (slen.div_ceil(16), xlen.div_ceil(16)),
+        };
         Self {
             slen: slen as u64,
             xlen: xlen as u64,
-            schunk: (slen as u64).div_ceil(32),
-            xchunk: (xlen as u64).div_ceil(32),
+            schunk: schunk as u64,
+            xchunk: xchunk as u64,
             bitsize,
         }
     }
