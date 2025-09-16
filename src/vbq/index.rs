@@ -601,7 +601,7 @@ impl BlockIndex {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let index_header = IndexHeader::from_bytes(&bytes)?;
+        let index_header = IndexHeader::from_bytes(bytes)?;
         let buffer = {
             let mut buffer = Vec::new();
             let mut decoder = Decoder::new(Cursor::new(&bytes[INDEX_HEADER_SIZE..]))?;
@@ -660,6 +660,7 @@ impl BlockIndex {
     }
 
     /// Returns the total number of records in the dataset
+    #[must_use]
     pub fn num_records(&self) -> usize {
         self.ranges
             .iter()

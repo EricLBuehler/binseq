@@ -62,7 +62,7 @@ impl ParallelProcessor for RangeProcessor {
 
     fn on_batch_complete(&mut self) -> Result<()> {
         if let Some(tid) = self.tid {
-            println!("Thread {} completed batch processing", tid);
+            println!("Thread {tid} completed batch processing");
         }
         Ok(())
     }
@@ -90,8 +90,8 @@ fn main() -> Result<()> {
     let reader = BinseqReader::new(file_path)?;
     let total_records = reader.num_records()?;
 
-    println!("File: {}", file_path);
-    println!("Total records in file: {}", total_records);
+    println!("File: {file_path}");
+    println!("Total records in file: {total_records}");
 
     // Parse range arguments or use defaults
     let start = args
@@ -109,22 +109,18 @@ fn main() -> Result<()> {
 
     // Validate range
     if start >= total_records {
-        eprintln!(
-            "Error: Start index {} is >= total records {}",
-            start, total_records
-        );
+        eprintln!("Error: Start index {start} is >= total records {total_records}");
         std::process::exit(1);
     }
     if end > total_records {
         eprintln!(
-            "Warning: End index {} is > total records {}, clamping to {}",
-            end, total_records, total_records
+            "Warning: End index {end} is > total records {total_records}, clamping to {total_records}"
         );
     }
     let end = end.min(total_records);
 
     if start >= end {
-        eprintln!("Error: Start index {} must be < end index {}", start, end);
+        eprintln!("Error: Start index {start} must be < end index {end}");
         std::process::exit(1);
     }
 
@@ -134,7 +130,7 @@ fn main() -> Result<()> {
         end,
         end - start
     );
-    println!("Using {} threads", num_threads);
+    println!("Using {num_threads} threads");
     println!();
 
     // Demonstrate processing the full file
@@ -148,7 +144,7 @@ fn main() -> Result<()> {
     let elapsed_full = start_time.elapsed();
     println!("Full file processing completed!");
     println!("Records processed: {}", processor_full.count());
-    println!("Time taken: {:.2?}", elapsed_full);
+    println!("Time taken: {elapsed_full:.2?}");
     println!();
 
     // Demonstrate processing a specific range
@@ -163,7 +159,7 @@ fn main() -> Result<()> {
     println!("Range processing completed!");
     println!("Records processed: {}", processor_range.count());
     println!("Expected records: {}", end - start);
-    println!("Time taken: {:.2?}", elapsed_range);
+    println!("Time taken: {elapsed_range:.2?}");
 
     // Compare performance
     if processor_range.count() > 0 && processor_full.count() > 0 {
@@ -171,8 +167,8 @@ fn main() -> Result<()> {
         let range_rate = processor_range.count() as f64 / elapsed_range.as_secs_f64();
         println!();
         println!("=== Performance Comparison ===");
-        println!("Full file rate: {:.0} records/sec", full_rate);
-        println!("Range rate: {:.0} records/sec", range_rate);
+        println!("Full file rate: {full_rate:.0} records/sec");
+        println!("Range rate: {range_rate:.0} records/sec");
 
         if range_rate > full_rate {
             println!(

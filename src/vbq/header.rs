@@ -71,29 +71,36 @@ pub struct VBinseqHeaderBuilder {
     bitsize: Option<BitSize>,
 }
 impl VBinseqHeaderBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+    #[must_use]
     pub fn qual(mut self, qual: bool) -> Self {
         self.qual = Some(qual);
         self
     }
+    #[must_use]
     pub fn block(mut self, block: u64) -> Self {
         self.block = Some(block);
         self
     }
+    #[must_use]
     pub fn compressed(mut self, compressed: bool) -> Self {
         self.compressed = Some(compressed);
         self
     }
+    #[must_use]
     pub fn paired(mut self, paired: bool) -> Self {
         self.paired = Some(paired);
         self
     }
+    #[must_use]
     pub fn bitsize(mut self, bitsize: BitSize) -> Self {
         self.bitsize = Some(bitsize);
         self
     }
+    #[must_use]
     pub fn build(self) -> VBinseqHeader {
         VBinseqHeader::with_capacity(
             self.block.unwrap_or(BLOCK_SIZE),
@@ -414,6 +421,7 @@ impl BlockHeader {
         }
     }
 
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             magic: BLOCK_MAGIC,
@@ -423,6 +431,7 @@ impl BlockHeader {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.size == 0 && self.records == 0
     }
@@ -479,6 +488,7 @@ impl BlockHeader {
         Ok(Self::new(size, records))
     }
 
+    #[must_use]
     pub fn size_with_header(&self) -> usize {
         self.size as usize + SIZE_BLOCK_HEADER
     }
