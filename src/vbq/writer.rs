@@ -10,12 +10,16 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+//! use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
 //! use std::fs::File;
 //!
 //! // Create a VBINSEQ file writer
 //! let file = File::create("example.vbq").unwrap();
-//! let header = VBinseqHeader::with_capacity(128 * 1024, true, true, true);
+//! let header = VBinseqHeaderBuilder::new()
+//!     .block(128 * 1024)
+//!     .qual(true)
+//!     .compressed(true)
+//!     .build();
 //!
 //! let mut writer = VBinseqWriterBuilder::default()
 //!     .header(header)
@@ -93,14 +97,18 @@ fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usi
 /// # Examples
 ///
 /// ```rust,no_run
-/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
 /// use binseq::Policy;
 /// use std::fs::File;
 ///
 /// // Create a writer with custom settings
 /// let file = File::create("example.vbq").unwrap();
 /// let mut writer = VBinseqWriterBuilder::default()
-///     .header(VBinseqHeader::with_capacity(65536, true, true, true))
+///     .header(VBinseqHeaderBuilder::new()
+///         .block(65536)
+///         .qual(true)
+///         .compressed(true)
+///         .build())
 ///     .policy(Policy::IgnoreSequence)
 ///     .build(file)
 ///     .unwrap();
@@ -133,11 +141,15 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
     ///
     /// // Create a header with 64KB blocks and quality scores
-    /// let mut header = VBinseqHeader::with_capacity(65536, true, true, true);
-    /// header.qual = true;
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .block(65536)
+    ///     .qual(true)
+    ///     .paired(true)
+    ///     .compressed(true)
+    ///     .build();
     ///
     /// let builder = VBinseqWriterBuilder::default().header(header);
     /// ```
@@ -1214,7 +1226,7 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vbq::header::SIZE_HEADER;
+    use crate::vbq::{header::SIZE_HEADER, VBinseqHeaderBuilder};
 
     #[test]
     fn test_headless_writer() -> super::Result<()> {
@@ -1234,7 +1246,7 @@ mod tests {
     #[test]
     fn test_ingest_empty_writer() -> super::Result<()> {
         // Test ingesting from an empty writer
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer that's empty
         let mut source = VBinseqWriterBuilder::default()
@@ -1264,7 +1276,7 @@ mod tests {
     #[test]
     fn test_ingest_single_record() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1310,7 +1322,7 @@ mod tests {
     #[test]
     fn test_ingest_multi_record() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1357,7 +1369,7 @@ mod tests {
     #[test]
     fn test_ingest_block_boundary() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1405,8 +1417,8 @@ mod tests {
     #[test]
     fn test_ingest_with_quality_scores() -> super::Result<()> {
         // Test ingesting records with quality scores
-        let source_header = VBinseqHeader::new(true, false, false); // with quality
-        let dest_header = VBinseqHeader::new(true, false, false); // with quality
+        let source_header = VBinseqHeaderBuilder::new().qual(true).build();
+        let dest_header = VBinseqHeaderBuilder::new().qual(true).build();
 
         // Create a source writer with quality scores
         let mut source = VBinseqWriterBuilder::default()
@@ -1445,7 +1457,7 @@ mod tests {
     #[test]
     fn test_ingest_with_compression() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, true, false);
+        let header = VBinseqHeaderBuilder::new().compressed(true).build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1489,8 +1501,8 @@ mod tests {
 
     #[test]
     fn test_ingest_incompatible_headers() -> super::Result<()> {
-        let source_header = VBinseqHeader::new(false, false, false);
-        let dest_header = VBinseqHeader::new(true, false, false);
+        let source_header = VBinseqHeaderBuilder::new().build();
+        let dest_header = VBinseqHeaderBuilder::new().qual(true).build();
 
         // Create a source writer with quality scores
         let mut source = VBinseqWriterBuilder::default()

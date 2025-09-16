@@ -62,6 +62,49 @@ pub const RESERVED_BYTES: [u8; 15] = [42; 15];
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
 pub const RESERVED_BYTES_BLOCK: [u8; 12] = [42; 12];
 
+#[derive(Default, Debug, Clone, Copy)]
+pub struct VBinseqHeaderBuilder {
+    qual: Option<bool>,
+    block: Option<u64>,
+    compressed: Option<bool>,
+    paired: Option<bool>,
+    bitsize: Option<BitSize>,
+}
+impl VBinseqHeaderBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn qual(mut self, qual: bool) -> Self {
+        self.qual = Some(qual);
+        self
+    }
+    pub fn block(mut self, block: u64) -> Self {
+        self.block = Some(block);
+        self
+    }
+    pub fn compressed(mut self, compressed: bool) -> Self {
+        self.compressed = Some(compressed);
+        self
+    }
+    pub fn paired(mut self, paired: bool) -> Self {
+        self.paired = Some(paired);
+        self
+    }
+    pub fn bitsize(mut self, bitsize: BitSize) -> Self {
+        self.bitsize = Some(bitsize);
+        self
+    }
+    pub fn build(self) -> VBinseqHeader {
+        VBinseqHeader::with_capacity(
+            self.block.unwrap_or(BLOCK_SIZE),
+            self.qual.unwrap_or(false),
+            self.compressed.unwrap_or(false),
+            self.paired.unwrap_or(false),
+            self.bitsize.unwrap_or_default(),
+        )
+    }
+}
+
 /// File header for VBINSEQ files
 ///
 /// This structure represents the 32-byte header that appears at the beginning of every
@@ -127,7 +170,7 @@ impl Default for VBinseqHeader {
     /// - Does not use compression
     /// - Does not support paired sequences
     fn default() -> Self {
-        Self::with_capacity(BLOCK_SIZE, false, false, false)
+        Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default())
     }
 }
 impl VBinseqHeader {
@@ -142,14 +185,17 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use binseq::vbq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeaderBuilder;
     ///
     /// // Create header with quality scores and compression, without paired sequences
-    /// let header = VBinseqHeader::new(true, true, false);
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .qual(true)
+    ///     .compressed(true)
+    ///     .build();
     /// ```
     #[must_use]
-    pub fn new(qual: bool, compressed: bool, paired: bool) -> Self {
-        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired)
+    pub fn new(qual: bool, compressed: bool, paired: bool, bitsize: BitSize) -> Self {
+        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired, bitsize)
     }
 
     /// Creates a new VBINSEQ header with a custom block size
@@ -164,13 +210,23 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use binseq::vbq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeaderBuilder;
     ///
     /// // Create header with a 256KB block size, with quality scores and compression
-    /// let header = VBinseqHeader::with_capacity(256 * 1024, true, true, false);
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .block(256 * 1024)
+    ///     .qual(true)
+    ///     .compressed(true)
+    ///     .build();
     /// ```
     #[must_use]
-    pub fn with_capacity(block: u64, qual: bool, compressed: bool, paired: bool) -> Self {
+    pub fn with_capacity(
+        block: u64,
+        qual: bool,
+        compressed: bool,
+        paired: bool,
+        bitsize: BitSize,
+    ) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
@@ -178,7 +234,7 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
-            bits: BitSize::default(),
+            bits: bitsize,
             reserved: RESERVED_BYTES,
         }
     }
