@@ -13,7 +13,7 @@ use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
-use crate::vbq::index::INDEX_END_MAGIC;
+use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC, INDEX_HEADER_SIZE};
 use crate::ParallelReader;
 use crate::{
     error::{ReadError, Result},
@@ -773,8 +773,23 @@ impl MmapReader {
         }
         let mut header_bytes = [0u8; SIZE_BLOCK_HEADER];
         header_bytes.copy_from_slice(&self.mmap[self.pos..self.pos + SIZE_BLOCK_HEADER]);
-        let header = BlockHeader::from_bytes(&header_bytes)?;
-        self.pos += SIZE_BLOCK_HEADER; // advance past the block header
+        let header = match BlockHeader::from_bytes(&header_bytes) {
+            Ok(header) => {
+                self.pos += SIZE_BLOCK_HEADER;
+                header
+            }
+            // Bytes left - but not a BlockHeader - could be the index
+            Err(e) => {
+                let mut index_header_bytes = [0u8; INDEX_HEADER_SIZE];
+                index_header_bytes
+                    .copy_from_slice(&self.mmap[self.pos..self.pos + INDEX_HEADER_SIZE]);
+                if IndexHeader::from_bytes(&index_header_bytes).is_ok() {
+                    // Expected end of file
+                    return Ok(false);
+                }
+                return Err(e.into());
+            }
+        };
 
         // Read the block contents
         let rbound = if self.header.compressed {
