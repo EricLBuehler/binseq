@@ -14,6 +14,7 @@
 
 use std::io::{Read, Write};
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::error::{HeaderError, ReadError, Result};
@@ -110,7 +111,7 @@ pub struct VBinseqHeader {
     pub paired: bool,
 
     /// The bitsize of the sequence data (1 byte)
-    pub bits: u8,
+    pub bits: BitSize,
 
     /// Reserved bytes for future format extensions
     ///
@@ -177,9 +178,14 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
-            bits: 2,
+            bits: BitSize::default(),
             reserved: RESERVED_BYTES,
         }
+    }
+
+    /// Sets the encoding bitsize for the header.
+    pub fn set_bitsize(&mut self, bits: BitSize) {
+        self.bits = bits;
     }
 
     /// Creates a header from a 32-byte buffer
@@ -214,8 +220,8 @@ impl VBinseqHeader {
         let compressed = buffer[14] != 0;
         let paired = buffer[15] != 0;
         let bits = match buffer[16] {
-            0 | 2 | 42 => 2,
-            4 => 4,
+            0 | 2 | 42 => BitSize::Two,
+            4 => BitSize::Four,
             x => return Err(HeaderError::InvalidBitSize(x).into()),
         };
         let Ok(reserved) = buffer[17..32].try_into() else {
@@ -257,7 +263,7 @@ impl VBinseqHeader {
         buffer[13] = self.qual.into();
         buffer[14] = self.compressed.into();
         buffer[15] = self.paired.into();
-        buffer[16] = self.bits;
+        buffer[16] = self.bits.into();
         buffer[17..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())

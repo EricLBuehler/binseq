@@ -13,6 +13,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
+use bitnuc::BitSize;
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
@@ -68,7 +69,7 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
-    fn bitsize(&self) -> u8 {
+    fn bitsize(&self) -> BitSize {
         self.config.bitsize
     }
     fn index(&self) -> u64 {
@@ -110,7 +111,7 @@ pub struct RecordConfig {
     /// (each u64 stores 32 values)
     xchunk: u64,
     /// The bitsize of the record
-    bitsize: u8,
+    bitsize: BitSize,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -127,7 +128,7 @@ impl RecordConfig {
     /// # Returns
     ///
     /// A new `RecordConfig` instance with the specified sequence lengths
-    pub fn new(slen: usize, xlen: usize, bitsize: u8) -> Self {
+    pub fn new(slen: usize, xlen: usize, bitsize: BitSize) -> Self {
         Self {
             slen: slen as u64,
             xlen: xlen as u64,

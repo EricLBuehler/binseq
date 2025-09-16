@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
 use zstd::Decoder;
@@ -53,7 +54,7 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// ```
 pub struct RecordBlock {
     /// Bitsize of the records in the block
-    bitsize: u8,
+    bitsize: BitSize,
 
     /// Index of the first record in the block
     /// This allows records to maintain their global position in the file
@@ -99,7 +100,7 @@ impl RecordBlock {
     ///
     /// A new empty `RecordBlock` instance
     #[must_use]
-    pub fn new(bitsize: u8, block_size: usize) -> Self {
+    pub fn new(bitsize: BitSize, block_size: usize) -> Self {
         Self {
             bitsize,
             index: 0,
@@ -448,7 +449,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 /// ```
 pub struct RefRecord<'a> {
     /// Bitsize of the record
-    bitsize: u8,
+    bitsize: BitSize,
 
     /// Global index of this record within the file
     index: u64,
@@ -478,7 +479,7 @@ impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        bitsize: u8,
+        bitsize: BitSize,
         index: u64,
         flag: u64,
         slen: u64,
@@ -503,7 +504,7 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
-    fn bitsize(&self) -> u8 {
+    fn bitsize(&self) -> BitSize {
         self.bitsize
     }
     fn index(&self) -> u64 {

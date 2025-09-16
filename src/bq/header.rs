@@ -4,6 +4,7 @@
 //! The header contains metadata about the binary sequence data, including format version,
 //! sequence length, and other information necessary for proper interpretation of the data.
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 
@@ -57,7 +58,7 @@ pub struct BinseqHeader {
     /// Number of bits per nucleotide (currently 2 or 4)
     ///
     /// 1 byte
-    pub bits: u8,
+    pub bits: BitSize,
 
     /// Reserve remaining bytes for future use
     ///
@@ -85,7 +86,7 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen: 0,
-            bits: 2,
+            bits: BitSize::default(),
             reserved: [42; 18],
         }
     }
@@ -110,13 +111,13 @@ impl BinseqHeader {
             format: FORMAT,
             slen,
             xlen,
-            bits: 2,
+            bits: BitSize::default(),
             reserved: [42; 18],
         }
     }
 
     /// Sets the bitsize of the header
-    pub fn set_bitsize(&mut self, bits: u8) {
+    pub fn set_bitsize(&mut self, bits: BitSize) {
         self.bits = bits;
     }
 
@@ -158,8 +159,8 @@ impl BinseqHeader {
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
         let bits = match buffer[13] {
-            0 | 2 | 42 => 2,
-            4 => 4,
+            0 | 2 | 42 => BitSize::Two,
+            4 => BitSize::Four,
             x => return Err(HeaderError::InvalidBitSize(x).into()),
         };
         let Ok(reserved) = buffer[14..32].try_into() else {
@@ -227,7 +228,7 @@ impl BinseqHeader {
         buffer[4] = self.format;
         LittleEndian::write_u32(&mut buffer[5..9], self.slen);
         LittleEndian::write_u32(&mut buffer[9..13], self.xlen);
-        buffer[13] = self.bits;
+        buffer[13] = self.bits.into();
         buffer[14..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())

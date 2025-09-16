@@ -22,10 +22,6 @@ pub enum Error {
     #[error("Error processing Index: {0}")]
     IndexError(#[from] IndexError),
 
-    /// Errors related to record operations
-    #[error("Error processing Record: {0}")]
-    RecordError(#[from] RecordError),
-
     /// Standard I/O errors
     #[error("Error with IO: {0}")]
     IoError(#[from] std::io::Error),
@@ -168,13 +164,6 @@ pub enum WriteError {
     #[error("Invalid nucleotides found in sequence: {0}")]
     InvalidNucleotideSequence(String),
 
-    /// The header specifies an unsupported bit size for encoding nucleotides
-    ///
-    /// # Arguments
-    /// * `u8` - The unsupported bit size
-    #[error("Unsupported bit size for nucleotide encoding: {0} - Expected 2 or 4")]
-    UnsupportedBitSize(u8),
-
     /// Attempted to write data without first setting up the header
     #[error("Missing header in writer builder")]
     MissingHeader,
@@ -264,11 +253,4 @@ pub enum ExtensionError {
     /// When the extension is not supported
     #[error("Unsupported extension in path: {0}")]
     UnsupportedExtension(String),
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum RecordError {
-    /// Invalid bitsize in the record
-    #[error("Invalid bitsize in record: {0}")]
-    InvalidBitsize(u8),
 }

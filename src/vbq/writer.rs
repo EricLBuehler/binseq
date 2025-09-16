@@ -31,6 +31,7 @@
 
 use std::io::Write;
 
+use bitnuc::BitSize;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -1121,7 +1122,7 @@ impl BlockWriter {
 #[derive(Clone)]
 pub struct Encoder {
     /// Bitsize of the nucleotides
-    bitsize: u8,
+    bitsize: BitSize,
 
     /// Reusable buffers for all nucleotides (written as 2-bit after conversion)
     sbuffer: Vec<u64>,
@@ -1140,7 +1141,7 @@ pub struct Encoder {
 
 impl Encoder {
     /// Initialize a new encoder with the given policy.
-    pub fn with_policy(bitsize: u8, policy: Policy) -> Self {
+    pub fn with_policy(bitsize: BitSize, policy: Policy) -> Self {
         Self {
             bitsize,
             policy,
@@ -1156,21 +1157,15 @@ impl Encoder {
     ///
     /// Will return `None` if the sequence is invalid and the policy does not allow correction.
     pub fn encode_single(&mut self, primary: &[u8]) -> Result<Option<&[u64]>> {
-        let encode_func = match self.bitsize {
-            2 | 42 => bitnuc::twobit::encode,
-            4 => bitnuc::fourbit::encode,
-            x => return Err(WriteError::UnsupportedBitSize(x).into()),
-        };
-
         // Fill the buffer with the bit representation of the nucleotides
         self.clear();
-        if encode_func(primary, &mut self.sbuffer).is_err() {
+        if self.bitsize.encode(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
+                self.bitsize.encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -1186,15 +1181,9 @@ impl Encoder {
         primary: &[u8],
         extended: &[u8],
     ) -> Result<Option<(&[u64], &[u64])>> {
-        let encode_func = match self.bitsize {
-            2 | 42 => bitnuc::twobit::encode,
-            4 => bitnuc::fourbit::encode,
-            x => return Err(WriteError::UnsupportedBitSize(x).into()),
-        };
-
         self.clear();
-        if encode_func(primary, &mut self.sbuffer).is_err()
-            || encode_func(extended, &mut self.xbuffer).is_err()
+        if self.bitsize.encode(primary, &mut self.sbuffer).is_err()
+            || self.bitsize.encode(extended, &mut self.xbuffer).is_err()
         {
             self.clear();
             if self
@@ -1204,8 +1193,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
-                encode_func(&self.x_ibuf, &mut self.xbuffer)?;
+                self.bitsize.encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.bitsize.encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }

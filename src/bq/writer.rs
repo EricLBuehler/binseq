@@ -144,21 +144,15 @@ impl Encoder {
             .into());
         }
 
-        let encode_func = match self.header.bits {
-            2 | 42 => bitnuc::twobit::encode, // 42 for previous version support (42 = reserved slot)
-            4 => bitnuc::fourbit::encode,
-            x => return Err(WriteError::UnsupportedBitSize(x).into()),
-        };
-
         // Fill the buffer with the 2-bit representation of the nucleotides
         self.clear();
-        if encode_func(primary, &mut self.sbuffer).is_err() {
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -190,15 +184,13 @@ impl Encoder {
             .into());
         }
 
-        let encode_func = match self.header.bits {
-            2 | 42 => bitnuc::twobit::encode, // 42 for previous version support (42 = reserved slot)
-            4 => bitnuc::fourbit::encode,
-            x => return Err(WriteError::UnsupportedBitSize(x).into()),
-        };
-
         self.clear();
-        if encode_func(primary, &mut self.sbuffer).is_err()
-            || encode_func(extended, &mut self.xbuffer).is_err()
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err()
+            || self
+                .header
+                .bits
+                .encode(extended, &mut self.xbuffer)
+                .is_err()
         {
             self.clear();
             if self
@@ -208,8 +200,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                encode_func(&self.s_ibuf, &mut self.sbuffer)?;
-                encode_func(&self.x_ibuf, &mut self.xbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }
