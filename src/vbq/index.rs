@@ -22,7 +22,7 @@ pub const INDEX_HEADER_SIZE: usize = 32;
 pub const INDEX_MAGIC: u64 = 0x5845444e49514256;
 /// Magic number to designate end of index (INDEXEND)
 #[allow(clippy::unreadable_literal)]
-pub const INDEX_END_MAGIC: u64 = 0x494E444558454E49;
+pub const INDEX_END_MAGIC: u64 = 0x444E455845444E49;
 /// Index Block Reservation
 pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
 
