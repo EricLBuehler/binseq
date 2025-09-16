@@ -8,7 +8,10 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use binseq::{bq, BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
+use binseq::{
+    bq::{self, BinseqHeaderBuilder},
+    BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader,
+};
 use nucgen::Sequence;
 
 #[derive(Clone, Default)]
@@ -113,7 +116,7 @@ where
 
 fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()> {
     // Open the output file
-    let header = bq::BinseqHeader::new(seq_size as u32);
+    let header = BinseqHeaderBuilder::new().slen(seq_size as u32).build()?;
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
     let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)
@@ -135,7 +138,10 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
 
 fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usize) -> Result<()> {
     // Open the output file
-    let header = bq::BinseqHeader::new_extended(r1_size as u32, r2_size as u32);
+    let header = bq::BinseqHeaderBuilder::new()
+        .slen(r1_size as u32)
+        .xlen(r2_size as u32)
+        .build()?;
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
     let mut writer = bq::BinseqWriterBuilder::default()
         .header(header)

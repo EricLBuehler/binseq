@@ -14,6 +14,7 @@
 
 use std::io::{Read, Write};
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::error::{HeaderError, ReadError, Result};
@@ -54,12 +55,55 @@ pub const BLOCK_SIZE: u64 = 128 * 1024;
 /// Reserved bytes for future use in the file header (16 bytes)
 ///
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
-pub const RESERVED_BYTES: [u8; 16] = [42; 16];
+pub const RESERVED_BYTES: [u8; 15] = [42; 15];
 
 /// Reserved bytes for future use in block headers (12 bytes)
 ///
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
 pub const RESERVED_BYTES_BLOCK: [u8; 12] = [42; 12];
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct VBinseqHeaderBuilder {
+    qual: Option<bool>,
+    block: Option<u64>,
+    compressed: Option<bool>,
+    paired: Option<bool>,
+    bitsize: Option<BitSize>,
+}
+impl VBinseqHeaderBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn qual(mut self, qual: bool) -> Self {
+        self.qual = Some(qual);
+        self
+    }
+    pub fn block(mut self, block: u64) -> Self {
+        self.block = Some(block);
+        self
+    }
+    pub fn compressed(mut self, compressed: bool) -> Self {
+        self.compressed = Some(compressed);
+        self
+    }
+    pub fn paired(mut self, paired: bool) -> Self {
+        self.paired = Some(paired);
+        self
+    }
+    pub fn bitsize(mut self, bitsize: BitSize) -> Self {
+        self.bitsize = Some(bitsize);
+        self
+    }
+    pub fn build(self) -> VBinseqHeader {
+        VBinseqHeader::with_capacity(
+            self.block.unwrap_or(BLOCK_SIZE),
+            self.qual.unwrap_or(false),
+            self.compressed.unwrap_or(false),
+            self.paired.unwrap_or(false),
+            self.bitsize.unwrap_or_default(),
+        )
+    }
+}
 
 /// File header for VBINSEQ files
 ///
@@ -109,10 +153,13 @@ pub struct VBinseqHeader {
     /// If true, each record has both primary and extended sequences (1 byte)
     pub paired: bool,
 
+    /// The bitsize of the sequence data (1 byte)
+    pub bits: BitSize,
+
     /// Reserved bytes for future format extensions
     ///
     /// Currently filled with placeholder values (16 bytes)
-    pub reserved: [u8; 16],
+    pub reserved: [u8; 15],
 }
 impl Default for VBinseqHeader {
     /// Creates a default header with default block size and all features disabled
@@ -123,7 +170,7 @@ impl Default for VBinseqHeader {
     /// - Does not use compression
     /// - Does not support paired sequences
     fn default() -> Self {
-        Self::with_capacity(BLOCK_SIZE, false, false, false)
+        Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default())
     }
 }
 impl VBinseqHeader {
@@ -138,14 +185,17 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use binseq::vbq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeaderBuilder;
     ///
     /// // Create header with quality scores and compression, without paired sequences
-    /// let header = VBinseqHeader::new(true, true, false);
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .qual(true)
+    ///     .compressed(true)
+    ///     .build();
     /// ```
     #[must_use]
-    pub fn new(qual: bool, compressed: bool, paired: bool) -> Self {
-        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired)
+    pub fn new(qual: bool, compressed: bool, paired: bool, bitsize: BitSize) -> Self {
+        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired, bitsize)
     }
 
     /// Creates a new VBINSEQ header with a custom block size
@@ -160,13 +210,23 @@ impl VBinseqHeader {
     /// # Example
     ///
     /// ```rust
-    /// use binseq::vbq::VBinseqHeader;
+    /// use binseq::vbq::VBinseqHeaderBuilder;
     ///
     /// // Create header with a 256KB block size, with quality scores and compression
-    /// let header = VBinseqHeader::with_capacity(256 * 1024, true, true, false);
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .block(256 * 1024)
+    ///     .qual(true)
+    ///     .compressed(true)
+    ///     .build();
     /// ```
     #[must_use]
-    pub fn with_capacity(block: u64, qual: bool, compressed: bool, paired: bool) -> Self {
+    pub fn with_capacity(
+        block: u64,
+        qual: bool,
+        compressed: bool,
+        paired: bool,
+        bitsize: BitSize,
+    ) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
@@ -174,8 +234,14 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
+            bits: bitsize,
             reserved: RESERVED_BYTES,
         }
+    }
+
+    /// Sets the encoding bitsize for the header.
+    pub fn set_bitsize(&mut self, bits: BitSize) {
+        self.bits = bits;
     }
 
     /// Creates a header from a 32-byte buffer
@@ -209,7 +275,12 @@ impl VBinseqHeader {
         let qual = buffer[13] != 0;
         let compressed = buffer[14] != 0;
         let paired = buffer[15] != 0;
-        let Ok(reserved) = buffer[16..32].try_into() else {
+        let bits = match buffer[16] {
+            0 | 2 | 42 => BitSize::Two,
+            4 => BitSize::Four,
+            x => return Err(HeaderError::InvalidBitSize(x).into()),
+        };
+        let Ok(reserved) = buffer[17..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -219,6 +290,7 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
+            bits,
             reserved,
         })
     }
@@ -247,7 +319,8 @@ impl VBinseqHeader {
         buffer[13] = self.qual.into();
         buffer[14] = self.compressed.into();
         buffer[15] = self.paired.into();
-        buffer[16..32].copy_from_slice(&self.reserved);
+        buffer[16] = self.bits.into();
+        buffer[17..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

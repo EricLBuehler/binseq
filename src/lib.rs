@@ -87,3 +87,6 @@ pub use error::{Error, Result};
 pub use parallel::{BinseqReader, ParallelProcessor, ParallelReader};
 pub use policy::{Policy, RNG_SEED};
 pub use record::BinseqRecord;
+
+/// Re-export bitnuc::BitSize
+pub use bitnuc::BitSize;

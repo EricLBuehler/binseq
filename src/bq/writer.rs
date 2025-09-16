@@ -95,8 +95,8 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, Encoder};
-    /// let header = BinseqHeader::new(100); // For sequences of length 100
+    /// # use binseq::bq::{BinseqHeaderBuilder, Encoder};
+    /// let header = BinseqHeaderBuilder::new().slen(100).build().unwrap();
     /// let encoder = Encoder::new(header);
     /// ```
     #[must_use]
@@ -114,9 +114,9 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, Encoder};
+    /// # use binseq::bq::{BinseqHeaderBuilder, Encoder};
     /// # use binseq::Policy;
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build().unwrap();
     /// let encoder = Encoder::with_policy(header, Policy::SetToA);
     /// ```
     #[must_use]
@@ -146,13 +146,13 @@ impl Encoder {
 
         // Fill the buffer with the 2-bit representation of the nucleotides
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err() {
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -185,8 +185,12 @@ impl Encoder {
         }
 
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err()
-            || bitnuc::encode(extended, &mut self.xbuffer).is_err()
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err()
+            || self
+                .header
+                .bits
+                .encode(extended, &mut self.xbuffer)
+                .is_err()
         {
             self.clear();
             if self
@@ -196,8 +200,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -225,9 +229,9 @@ impl Encoder {
 ///
 /// ```
 /// # use binseq::{Policy, Result};
-/// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+/// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriterBuilder};
 /// # fn main() -> Result<()> {
-/// let header = BinseqHeader::new(100);
+/// let header = BinseqHeaderBuilder::new().slen(100).build()?;
 /// let writer = BinseqWriterBuilder::default()
 ///     .header(header)
 ///     .policy(Policy::SetToA)
@@ -323,10 +327,10 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, BinseqWriter};
+    /// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriter};
     /// # use binseq::{Result, Policy};
     /// # fn main() -> Result<()> {
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build()?;
     /// let writer = BinseqWriter::new(
     ///     Vec::new(),
     ///     header,
@@ -420,10 +424,10 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+    /// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriterBuilder};
     /// # use binseq::Result;
     /// # fn main() -> Result<()> {
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build()?;
     /// let writer = BinseqWriterBuilder::default()
     ///     .header(header)
     ///     .build(Vec::new())?;
@@ -719,13 +723,13 @@ mod testing {
     use std::{fs::File, io::BufWriter};
 
     use super::*;
-    use crate::bq::SIZE_HEADER;
+    use crate::bq::{BinseqHeaderBuilder, SIZE_HEADER};
 
     #[test]
     fn test_headless() -> Result<()> {
         let inner = Vec::new();
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .headless(true)
             .build(inner)?;
         assert!(writer.is_headless());
@@ -738,7 +742,7 @@ mod testing {
     fn test_not_headless() -> Result<()> {
         let inner = Vec::new();
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(inner)?;
         assert!(!writer.is_headless());
         let inner = writer.by_ref();
@@ -749,7 +753,7 @@ mod testing {
     #[test]
     fn test_stdout() -> Result<()> {
         let writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(std::io::stdout())?;
         assert!(!writer.is_headless());
         Ok(())
@@ -760,7 +764,7 @@ mod testing {
         let path = "test_to_path.file";
         let inner = File::create(path).map(BufWriter::new)?;
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(inner)?;
         assert!(!writer.is_headless());
         let inner = writer.by_ref();
@@ -776,7 +780,7 @@ mod testing {
     fn test_stream_writer() -> Result<()> {
         let inner = Vec::new();
         let writer = StreamWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .buffer_capacity(16384)
             .build(inner)?;
 

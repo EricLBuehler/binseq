@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
 use zstd::Decoder;
@@ -30,8 +31,11 @@ use crate::{
 /// # Returns
 ///
 /// The number of 64-bit words required to encode the sequence
-fn encoded_sequence_len(len: u64) -> usize {
-    len.div_ceil(32) as usize
+fn encoded_sequence_len(len: u64, bitsize: BitSize) -> usize {
+    match bitsize {
+        BitSize::Two => len.div_ceil(32) as usize,
+        BitSize::Four => len.div_ceil(16) as usize,
+    }
 }
 
 /// A container for a block of VBINSEQ records
@@ -52,6 +56,9 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// let mut block = reader.new_block(); // Create a block with appropriate size
 /// ```
 pub struct RecordBlock {
+    /// Bitsize of the records in the block
+    bitsize: BitSize,
+
     /// Index of the first record in the block
     /// This allows records to maintain their global position in the file
     index: usize,
@@ -89,14 +96,16 @@ impl RecordBlock {
     ///
     /// # Parameters
     ///
+    /// * `bitsize` - Bitsize of the records in the block
     /// * `block_size` - Maximum size of the block in bytes
     ///
     /// # Returns
     ///
     /// A new empty `RecordBlock` instance
     #[must_use]
-    pub fn new(block_size: usize) -> Self {
+    pub fn new(bitsize: BitSize, block_size: usize) -> Self {
         Self {
+            bitsize,
             index: 0,
             flags: Vec::new(),
             lens: Vec::new(),
@@ -224,7 +233,7 @@ impl RecordBlock {
 
             // Add the primary sequence to the block
             let mut seq = [0u8; 8];
-            for _ in 0..encoded_sequence_len(slen) {
+            for _ in 0..encoded_sequence_len(slen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -238,7 +247,7 @@ impl RecordBlock {
             }
 
             // Add the extended sequence to the block
-            for _ in 0..encoded_sequence_len(xlen) {
+            for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -288,7 +297,7 @@ impl RecordBlock {
             self.lens.push(xlen);
 
             // Read the sequence and advance the position
-            let schunk = encoded_sequence_len(slen);
+            let schunk = encoded_sequence_len(slen, self.bitsize);
             let schunk_bytes = schunk * 8;
             self.rbuf.resize(schunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..schunk_bytes])?;
@@ -309,7 +318,7 @@ impl RecordBlock {
             }
 
             // Read the sequence and advance the position
-            let xchunk = encoded_sequence_len(xlen);
+            let xchunk = encoded_sequence_len(xlen, self.bitsize);
             let xchunk_bytes = xchunk * 8;
             self.rbuf.resize(xchunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
@@ -361,8 +370,8 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         let flag = self.block.flags[self.rpos];
         let slen = self.block.lens[2 * self.rpos];
         let xlen = self.block.lens[(2 * self.rpos) + 1];
-        let schunk = encoded_sequence_len(slen);
-        let xchunk = encoded_sequence_len(xlen);
+        let schunk = encoded_sequence_len(slen, self.block.bitsize);
+        let xchunk = encoded_sequence_len(xlen, self.block.bitsize);
 
         let s_seq = &self.block.sequences[self.epos..self.epos + schunk];
         let s_qual = if self.block.qualities.is_empty() {
@@ -384,7 +393,15 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         self.rpos += 1;
 
         Some(RefRecord::new(
-            index, flag, slen, xlen, s_seq, x_seq, s_qual, x_qual,
+            self.block.bitsize,
+            index,
+            flag,
+            slen,
+            xlen,
+            s_seq,
+            x_seq,
+            s_qual,
+            x_qual,
         ))
     }
 }
@@ -434,6 +451,9 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 /// }
 /// ```
 pub struct RefRecord<'a> {
+    /// Bitsize of the record
+    bitsize: BitSize,
+
     /// Global index of this record within the file
     index: u64,
 
@@ -462,6 +482,7 @@ impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
+        bitsize: BitSize,
         index: u64,
         flag: u64,
         slen: u64,
@@ -472,6 +493,7 @@ impl<'a> RefRecord<'a> {
         xqual: &'a [u8],
     ) -> Self {
         Self {
+            bitsize,
             index,
             flag,
             slen,
@@ -485,6 +507,9 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
+    fn bitsize(&self) -> BitSize {
+        self.bitsize
+    }
     fn index(&self) -> u64 {
         self.index
     }
@@ -508,10 +533,6 @@ impl BinseqRecord for RefRecord<'_> {
     }
     fn xqual(&self) -> &[u8] {
         self.xqual
-    }
-    fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf, self.xlen as usize, dbuf)?;
-        Ok(())
     }
 }
 
@@ -642,7 +663,7 @@ impl MmapReader {
     /// ```
     #[must_use]
     pub fn new_block(&self) -> RecordBlock {
-        RecordBlock::new(self.header.block as usize)
+        RecordBlock::new(self.header.bits, self.header.block as usize)
     }
 
     /// Returns the path where the index file would be located
@@ -1039,7 +1060,7 @@ impl ParallelReader for MmapReader {
 
             let handle = std::thread::spawn(move || -> Result<()> {
                 // Create block to reuse for processing (within thread)
-                let mut record_block = RecordBlock::new(header.block as usize);
+                let mut record_block = RecordBlock::new(header.bits, header.block as usize);
 
                 // Process each assigned block
                 for block_range in thread_blocks {

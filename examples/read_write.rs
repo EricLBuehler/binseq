@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use binseq::{
-    bq::{BinseqHeader, BinseqWriterBuilder, MmapReader},
+    bq::{BinseqHeaderBuilder, BinseqWriterBuilder, MmapReader},
     BinseqRecord,
 };
 use seq_io::fastq::{Reader, Record};
@@ -15,7 +15,7 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     let (in_handle, _comp) = niffler::from_path(fastq_path)?;
 
     // Open the output file
-    let header = BinseqHeader::new(seq_size as u32);
+    let header = BinseqHeaderBuilder::new().slen(seq_size as u32).build()?;
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
     let mut writer = BinseqWriterBuilder::default()
         .header(header)
@@ -83,7 +83,10 @@ fn read_write_paired(
     let (in_handle_r2, _comp) = niffler::get_reader(Box::new(in_buf_r2))?;
 
     // Create the header
-    let header = BinseqHeader::new_extended(seq_size_r1 as u32, seq_size_r2 as u32);
+    let header = BinseqHeaderBuilder::new()
+        .slen(seq_size_r1 as u32)
+        .xlen(seq_size_r2 as u32)
+        .build()?;
 
     // Open the output handle
     let out_handle = File::create(binseq_path).map(BufWriter::new)?;
