@@ -18,6 +18,10 @@ pub enum Error {
     #[error("Error reading file: {0}")]
     ReadError(#[from] ReadError),
 
+    /// Errors that occur during build operations
+    #[error("Error building file: {0}")]
+    BuilderError(#[from] BuilderError),
+
     /// Errors related to file indexing
     #[error("Error processing Index: {0}")]
     IndexError(#[from] IndexError),
@@ -144,6 +148,12 @@ pub enum ReadError {
     /// When the file metadata doesn't match the expected VBINSEQ format
     #[error("Unexpected file metadata")]
     InvalidFileType,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BuilderError {
+    #[error("Missing sequence length")]
+    MissingSlen,
 }
 
 /// Errors that can occur while writing binary sequence data
