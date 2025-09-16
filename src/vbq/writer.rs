@@ -321,6 +321,9 @@ pub struct VBinseqWriter<W: Write> {
 
     /// Total records written to this writer
     records_written: usize,
+
+    /// Determines if index is already written
+    index_written: bool,
 }
 impl<W: Write> VBinseqWriter<W> {
     pub fn new(inner: W, header: VBinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
@@ -332,6 +335,7 @@ impl<W: Write> VBinseqWriter<W> {
             ranges: Vec::new(),
             bytes_written: 0,
             records_written: 0,
+            index_written: false,
         };
         if !headless {
             wtr.init()?;
@@ -833,7 +837,11 @@ impl<W: Write> VBinseqWriter<W> {
             &mut self.records_written,
         )?;
         self.inner.flush()?;
-        self.write_index()?;
+
+        if !self.index_written {
+            self.write_index()?;
+            self.index_written = true;
+        }
         Ok(())
     }
 
