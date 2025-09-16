@@ -13,7 +13,7 @@ keywords = ["bioinformatics", "nucleotide", "sequencing", "genomics", "fastq"]
 [dependencies]
 anyhow = "1.0.94"
 auto_impl = "1.3.0"
-bitnuc = "0.2.11"
+bitnuc = "0.3.0"
 bytemuck = "1.21.0"
 byteorder = "1.5.0"
 memmap2 = "0.9.5"
