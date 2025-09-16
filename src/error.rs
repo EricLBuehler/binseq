@@ -148,6 +148,10 @@ pub enum ReadError {
     /// When the file metadata doesn't match the expected VBINSEQ format
     #[error("Unexpected file metadata")]
     InvalidFileType,
+
+    /// Missing the index end magic number
+    #[error("Missing index end magic number")]
+    MissingIndexEndMagic,
 }
 
 #[derive(thiserror::Error, Debug)]
