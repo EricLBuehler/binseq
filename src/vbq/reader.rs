@@ -13,6 +13,7 @@ use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
+use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC, INDEX_HEADER_SIZE};
 use crate::ParallelReader;
 use crate::{
     error::{ReadError, Result},
@@ -772,8 +773,23 @@ impl MmapReader {
         }
         let mut header_bytes = [0u8; SIZE_BLOCK_HEADER];
         header_bytes.copy_from_slice(&self.mmap[self.pos..self.pos + SIZE_BLOCK_HEADER]);
-        let header = BlockHeader::from_bytes(&header_bytes)?;
-        self.pos += SIZE_BLOCK_HEADER; // advance past the block header
+        let header = match BlockHeader::from_bytes(&header_bytes) {
+            Ok(header) => {
+                self.pos += SIZE_BLOCK_HEADER;
+                header
+            }
+            // Bytes left - but not a BlockHeader - could be the index
+            Err(e) => {
+                let mut index_header_bytes = [0u8; INDEX_HEADER_SIZE];
+                index_header_bytes
+                    .copy_from_slice(&self.mmap[self.pos..self.pos + INDEX_HEADER_SIZE]);
+                if IndexHeader::from_bytes(&index_header_bytes).is_ok() {
+                    // Expected end of file
+                    return Ok(false);
+                }
+                return Err(e.into());
+            }
+        };
 
         // Read the block contents
         let rbound = if self.header.compressed {
@@ -838,24 +854,26 @@ impl MmapReader {
     /// extension appended. This allows for reusing the index across multiple runs,
     /// which can significantly improve startup performance for large files.
     pub fn load_index(&self) -> Result<BlockIndex> {
-        if self.index_path().exists() {
-            match BlockIndex::from_path(self.index_path()) {
-                Ok(index) => Ok(index),
-                Err(e) => {
-                    if e.is_index_mismatch() {
-                        let index = BlockIndex::from_vbq(&self.path)?;
-                        index.save_to_path(self.index_path())?;
-                        Ok(index)
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
-        } else {
-            let index = BlockIndex::from_vbq(&self.path)?;
-            index.save_to_path(self.index_path())?;
-            Ok(index)
+        let start_pos_magic = self.mmap.len() - 8;
+        let start_pos_index_size = start_pos_magic - 8;
+
+        // Validate the magic number
+        let magic = LittleEndian::read_u64(&self.mmap[start_pos_magic..]);
+        if magic != INDEX_END_MAGIC {
+            return Err(ReadError::MissingIndexEndMagic.into());
         }
+
+        // Get the index size
+        let index_size = LittleEndian::read_u64(&self.mmap[start_pos_index_size..start_pos_magic]);
+
+        // Determine the start position of the index bytes
+        let start_pos_index = start_pos_index_size - index_size as usize;
+
+        // Slice into the index bytes
+        let index_bytes = &self.mmap[start_pos_index..start_pos_index_size];
+
+        // Build the index from the bytes
+        BlockIndex::from_bytes(index_bytes)
     }
 
     pub fn num_records(&self) -> Result<usize> {
@@ -1009,7 +1027,7 @@ impl ParallelReader for MmapReader {
         let index = self.load_index()?;
 
         // Validate range
-        let total_records = self.num_records()?;
+        let total_records = index.num_records();
         if range.start >= total_records || range.end > total_records || range.start >= range.end {
             return Ok(()); // Nothing to process or invalid range
         }

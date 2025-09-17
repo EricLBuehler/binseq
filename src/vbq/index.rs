@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter, Cursor, Read, Write},
     path::Path,
 };
 
@@ -20,6 +20,9 @@ pub const INDEX_HEADER_SIZE: usize = 32;
 /// Magic number to designate index (VBQINDEX)
 #[allow(clippy::unreadable_literal)]
 pub const INDEX_MAGIC: u64 = 0x5845444e49514256;
+/// Magic number to designate end of index (INDEXEND)
+#[allow(clippy::unreadable_literal)]
+pub const INDEX_END_MAGIC: u64 = 0x444E455845444E49;
 /// Index Block Reservation
 pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
 
@@ -285,6 +288,13 @@ impl IndexHeader {
             reserved,
         })
     }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut buffer = [0; INDEX_HEADER_SIZE];
+        buffer.copy_from_slice(&bytes[..INDEX_HEADER_SIZE]);
+        Self::from_reader(&mut Cursor::new(buffer))
+    }
+
     /// Serializes the index header to a binary format and writes it to the provided writer
     ///
     /// This method serializes the `IndexHeader` to a fixed-size 32-byte structure and
@@ -347,10 +357,10 @@ impl IndexHeader {
 #[derive(Debug, Clone)]
 pub struct BlockIndex {
     /// Header containing metadata about the indexed file
-    header: IndexHeader,
+    pub(crate) header: IndexHeader,
 
     /// Collection of block ranges, one for each block in the file
-    ranges: Vec<BlockRange>,
+    pub(crate) ranges: Vec<BlockRange>,
 }
 impl BlockIndex {
     /// Creates a new empty block index with the specified header
@@ -426,6 +436,15 @@ impl BlockIndex {
         Ok(())
     }
 
+    /// Write the index to an output buffer
+    pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<()> {
+        self.header.write_bytes(writer)?;
+        let mut writer = Encoder::new(writer, 3)?.auto_finish();
+        self.write_range(&mut writer)?;
+        writer.flush()?;
+        Ok(())
+    }
+
     /// Write the collection of `BlockRange` to an output handle
     /// Writes all block ranges to the provided writer
     ///
@@ -444,6 +463,7 @@ impl BlockIndex {
     pub fn write_range<W: Write>(&self, writer: &mut W) -> Result<()> {
         self.ranges
             .iter()
+            .filter(|range| range.block_records > 0)
             .try_for_each(|range| -> Result<()> { range.write_bytes(writer) })
     }
 
@@ -580,6 +600,27 @@ impl BlockIndex {
         Ok(ranges)
     }
 
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let index_header = IndexHeader::from_bytes(bytes)?;
+        let buffer = {
+            let mut buffer = Vec::new();
+            let mut decoder = Decoder::new(Cursor::new(&bytes[INDEX_HEADER_SIZE..]))?;
+            decoder.read_to_end(&mut buffer)?;
+            buffer
+        };
+
+        let mut ranges = Self::new(index_header);
+        let mut pos = 0;
+        while pos < buffer.len() {
+            let bound = pos + SIZE_BLOCK_RANGE;
+            let range = BlockRange::from_bytes(&buffer[pos..bound]);
+            ranges.add_range(range);
+            pos += SIZE_BLOCK_RANGE;
+        }
+
+        Ok(ranges)
+    }
+
     /// Get a reference to the internal ranges
     /// Returns a reference to the collection of block ranges
     ///
@@ -619,6 +660,7 @@ impl BlockIndex {
     }
 
     /// Returns the total number of records in the dataset
+    #[must_use]
     pub fn num_records(&self) -> usize {
         self.ranges
             .iter()

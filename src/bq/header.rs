@@ -37,7 +37,14 @@ pub struct BinseqHeaderBuilder {
     xlen: Option<u32>,
     bitsize: Option<BitSize>,
 }
+impl Default for BinseqHeaderBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BinseqHeaderBuilder {
+    #[must_use]
     pub fn new() -> Self {
         BinseqHeaderBuilder {
             slen: None,
@@ -45,14 +52,17 @@ impl BinseqHeaderBuilder {
             bitsize: None,
         }
     }
+    #[must_use]
     pub fn slen(mut self, slen: u32) -> Self {
         self.slen = Some(slen);
         self
     }
+    #[must_use]
     pub fn xlen(mut self, xlen: u32) -> Self {
         self.xlen = Some(xlen);
         self
     }
+    #[must_use]
     pub fn bitsize(mut self, bitsize: BitSize) -> Self {
         self.bitsize = Some(bitsize);
         self
