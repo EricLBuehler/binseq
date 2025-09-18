@@ -55,7 +55,7 @@ pub const BLOCK_SIZE: u64 = 128 * 1024;
 /// Reserved bytes for future use in the file header (16 bytes)
 ///
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
-pub const RESERVED_BYTES: [u8; 15] = [42; 15];
+pub const RESERVED_BYTES: [u8; 14] = [42; 14];
 
 /// Reserved bytes for future use in block headers (12 bytes)
 ///
@@ -69,6 +69,7 @@ pub struct VBinseqHeaderBuilder {
     compressed: Option<bool>,
     paired: Option<bool>,
     bitsize: Option<BitSize>,
+    headers: Option<bool>,
 }
 impl VBinseqHeaderBuilder {
     #[must_use]
@@ -101,6 +102,11 @@ impl VBinseqHeaderBuilder {
         self
     }
     #[must_use]
+    pub fn headers(mut self, headers: bool) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+    #[must_use]
     pub fn build(self) -> VBinseqHeader {
         VBinseqHeader::with_capacity(
             self.block.unwrap_or(BLOCK_SIZE),
@@ -108,6 +114,7 @@ impl VBinseqHeaderBuilder {
             self.compressed.unwrap_or(false),
             self.paired.unwrap_or(false),
             self.bitsize.unwrap_or_default(),
+            self.headers.unwrap_or(false),
         )
     }
 }
@@ -163,10 +170,13 @@ pub struct VBinseqHeader {
     /// The bitsize of the sequence data (1 byte)
     pub bits: BitSize,
 
+    /// Whether sequence headers are included with sequences (1 byte)
+    pub headers: bool,
+
     /// Reserved bytes for future format extensions
     ///
     /// Currently filled with placeholder values (16 bytes)
-    pub reserved: [u8; 15],
+    pub reserved: [u8; 14],
 }
 impl Default for VBinseqHeader {
     /// Creates a default header with default block size and all features disabled
@@ -177,7 +187,7 @@ impl Default for VBinseqHeader {
     /// - Does not use compression
     /// - Does not support paired sequences
     fn default() -> Self {
-        Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default())
+        Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default(), false)
     }
 }
 impl VBinseqHeader {
@@ -201,8 +211,14 @@ impl VBinseqHeader {
     ///     .build();
     /// ```
     #[must_use]
-    pub fn new(qual: bool, compressed: bool, paired: bool, bitsize: BitSize) -> Self {
-        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired, bitsize)
+    pub fn new(
+        qual: bool,
+        compressed: bool,
+        paired: bool,
+        bitsize: BitSize,
+        headers: bool,
+    ) -> Self {
+        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired, bitsize, headers)
     }
 
     /// Creates a new VBINSEQ header with a custom block size
@@ -233,6 +249,7 @@ impl VBinseqHeader {
         compressed: bool,
         paired: bool,
         bitsize: BitSize,
+        headers: bool,
     ) -> Self {
         Self {
             magic: MAGIC,
@@ -241,6 +258,7 @@ impl VBinseqHeader {
             qual,
             compressed,
             paired,
+            headers,
             bits: bitsize,
             reserved: RESERVED_BYTES,
         }
@@ -287,7 +305,11 @@ impl VBinseqHeader {
             4 => BitSize::Four,
             x => return Err(HeaderError::InvalidBitSize(x).into()),
         };
-        let Ok(reserved) = buffer[17..32].try_into() else {
+        let headers = match buffer[17] {
+            0 | 42 => false, // backwards compatibility
+            _ => true,
+        };
+        let Ok(reserved) = buffer[18..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -298,6 +320,7 @@ impl VBinseqHeader {
             compressed,
             paired,
             bits,
+            headers,
             reserved,
         })
     }
@@ -327,7 +350,8 @@ impl VBinseqHeader {
         buffer[14] = self.compressed.into();
         buffer[15] = self.paired.into();
         buffer[16] = self.bits.into();
-        buffer[17..32].copy_from_slice(&self.reserved);
+        buffer[17] = self.headers.into();
+        buffer[18..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

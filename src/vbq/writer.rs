@@ -91,6 +91,20 @@ fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usi
     record_byte_size(schunk, xchunk) + slen + xlen
 }
 
+fn record_byte_size_quality_header(
+    schunk: usize,
+    xchunk: usize,
+    squal: usize,
+    xqual: usize,
+    sheader: usize,
+    xheader: usize,
+) -> usize {
+    // counting the header length bytes (u64)
+    let bytes_sheader = if sheader > 0 { sheader + 8 } else { 0 };
+    let bytes_xheader = if xheader > 0 { xheader + 8 } else { 0 };
+    record_byte_size(schunk, xchunk) + squal + xqual + bytes_sheader + bytes_xheader
+}
+
 /// A builder for creating configured `VBinseqWriter` instances
 ///
 /// This builder provides a fluent interface for configuring and creating a
@@ -423,6 +437,167 @@ impl<W: Write> VBinseqWriter<W> {
         self.header.qual
     }
 
+    pub fn has_headers(&self) -> bool {
+        self.header.headers
+    }
+
+    pub fn write_record(
+        &mut self,
+        flag: u64,
+        header: Option<&[u8]>,
+        sequence: &[u8],
+        quality: Option<&[u8]>,
+    ) -> Result<bool> {
+        if self.is_paired() {
+            return Err(WriteError::PairedFlagSet.into());
+        }
+
+        // ignore the header if not set
+        let header = if header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if header.is_some() && !self.header.headers {
+            None
+        } else {
+            header
+        };
+
+        // ignore the quality if not set
+        let quality = if quality.is_none() && self.header.qual {
+            return Err(WriteError::QualityFlagSet.into());
+        } else if quality.is_some() && !self.header.qual {
+            None
+        } else {
+            quality
+        };
+
+        // encode the sequence
+        if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
+            let record_size = record_byte_size_quality_header(
+                sbuffer.len(),
+                0,
+                quality.map(|x| x.len()).unwrap_or(0),
+                0,
+                header.map(|x| x.len()).unwrap_or(0),
+                0,
+            );
+            if self.cblock.exceeds_block_size(record_size)? {
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
+            }
+
+            // Write the flag, length, and sequence to the block
+            self.cblock.write_record(
+                flag,
+                sequence.len() as u64,
+                0,
+                sbuffer,
+                quality,
+                header,
+                None,
+                None,
+                None,
+            )?;
+
+            // Return true if the sequence was successfully written
+            Ok(true)
+        } else {
+            // Silently ignore sequences that fail encoding
+            Ok(false)
+        }
+    }
+
+    pub fn write_paired_record(
+        &mut self,
+        flag: u64,
+        s_header: Option<&[u8]>,
+        s_sequence: &[u8],
+        s_qual: Option<&[u8]>,
+        x_header: Option<&[u8]>,
+        x_sequence: &[u8],
+        x_qual: Option<&[u8]>,
+    ) -> Result<bool> {
+        if !self.is_paired() {
+            return Err(WriteError::PairedFlagNotSet.into());
+        }
+
+        let s_header = if s_header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if s_header.is_some() && !self.header.headers {
+            None
+        } else {
+            s_header
+        };
+        let x_header = if x_header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if x_header.is_some() && !self.header.headers {
+            None
+        } else {
+            x_header
+        };
+
+        let s_qual = if s_qual.is_none() && self.header.qual {
+            return Err(WriteError::QualityFlagSet.into());
+        } else if s_qual.is_some() && !self.header.qual {
+            None
+        } else {
+            s_qual
+        };
+
+        let x_qual = if x_qual.is_none() && self.header.qual {
+            return Err(WriteError::QualityFlagSet.into());
+        } else if x_qual.is_some() && !self.header.qual {
+            None
+        } else {
+            x_qual
+        };
+
+        // encode the sequences
+        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(s_sequence, x_sequence)? {
+            // Check if the current block can handle the next record
+            let record_size = record_byte_size_quality_header(
+                sbuffer.len(),
+                xbuffer.len(),
+                s_qual.map(|x| x.len()).unwrap_or(0),
+                x_qual.map(|x| x.len()).unwrap_or(0),
+                s_header.map(|x| x.len()).unwrap_or(0),
+                x_header.map(|x| x.len()).unwrap_or(0),
+            );
+            if self.cblock.exceeds_block_size(record_size)? {
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
+            }
+
+            // Write the flag, length, sequence, and quality scores to the block
+            self.cblock.write_record(
+                flag,
+                s_sequence.len() as u64,
+                x_sequence.len() as u64,
+                sbuffer,
+                s_qual,
+                s_header,
+                Some(xbuffer),
+                x_qual,
+                x_header,
+            )?;
+
+            // Return true if the record was successfully written
+            Ok(true)
+        } else {
+            // Return false if the record was not successfully written
+            Ok(false)
+        }
+    }
+
     /// Writes a single nucleotide sequence to the file
     ///
     /// This method encodes and writes a single nucleotide sequence to the VBINSEQ file.
@@ -472,6 +647,9 @@ impl<W: Write> VBinseqWriter<W> {
         if self.header.paired {
             return Err(WriteError::PairedFlagSet.into());
         }
+        if self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        }
 
         // encode the sequence
         if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
@@ -487,8 +665,17 @@ impl<W: Write> VBinseqWriter<W> {
             }
 
             // Write the flag, length, and sequence to the block
-            self.cblock
-                .write_record(flag, sequence.len() as u64, 0, sbuffer, None, None, None)?;
+            self.cblock.write_record(
+                flag,
+                sequence.len() as u64,
+                0,
+                sbuffer,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )?;
 
             // Return true if the sequence was successfully written
             Ok(true)
@@ -559,6 +746,9 @@ impl<W: Write> VBinseqWriter<W> {
         if !self.header.paired {
             return Err(WriteError::PairedFlagNotSet.into());
         }
+        if self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        }
 
         if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
             // Check if the current block can handle the next record
@@ -580,7 +770,9 @@ impl<W: Write> VBinseqWriter<W> {
                 extended.len() as u64,
                 sbuffer,
                 None,
+                None,
                 Some(xbuffer),
+                None,
                 None,
             )?;
 
@@ -654,6 +846,9 @@ impl<W: Write> VBinseqWriter<W> {
         if self.header.paired {
             return Err(WriteError::PairedFlagSet.into());
         }
+        if self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        }
 
         if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
             // Check if the current block can handle the next record
@@ -675,6 +870,8 @@ impl<W: Write> VBinseqWriter<W> {
                 0,
                 sbuffer,
                 Some(quality),
+                None,
+                None,
                 None,
                 None,
             )?;
@@ -762,6 +959,9 @@ impl<W: Write> VBinseqWriter<W> {
         if !self.header.paired {
             return Err(WriteError::PairedFlagNotSet.into());
         }
+        if self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        }
 
         if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(s_seq, x_seq)? {
             // Check if the current block can handle the next record
@@ -784,8 +984,10 @@ impl<W: Write> VBinseqWriter<W> {
                 x_seq.len() as u64,
                 sbuffer,
                 Some(s_qual),
+                None,
                 Some(xbuffer),
                 Some(x_qual),
+                None,
             )?;
 
             // Return true if the record was successfully written
@@ -1062,8 +1264,10 @@ impl BlockWriter {
         xlen: u64,
         sbuf: &[u64],
         squal: Option<&[u8]>,
+        sheader: Option<&[u8]>,
         xbuf: Option<&[u64]>,
         xqual: Option<&[u8]>,
+        xheader: Option<&[u8]>,
     ) -> Result<()> {
         // Tracks the record start position
         self.starts.push(self.pos);
@@ -1078,7 +1282,11 @@ impl BlockWriter {
         // Write the primary sequence and optional quality
         self.write_buffer(sbuf)?;
         if let Some(qual) = squal {
-            self.write_quality(qual)?;
+            self.write_u8buf(qual)?;
+        }
+        if let Some(sheader) = sheader {
+            self.write_length(sheader.len() as u64)?;
+            self.write_u8buf(sheader)?;
         }
 
         // Write the optional extended sequence and optional quality
@@ -1086,7 +1294,11 @@ impl BlockWriter {
             self.write_buffer(xbuf)?;
         }
         if let Some(qual) = xqual {
-            self.write_quality(qual)?;
+            self.write_u8buf(qual)?;
+        }
+        if let Some(xheader) = xheader {
+            self.write_length(xheader.len() as u64)?;
+            self.write_u8buf(xheader)?;
         }
 
         Ok(())
@@ -1111,9 +1323,9 @@ impl BlockWriter {
         Ok(())
     }
 
-    fn write_quality(&mut self, quality: &[u8]) -> Result<()> {
-        self.ubuf.write_all(quality)?;
-        self.pos += quality.len();
+    fn write_u8buf(&mut self, buf: &[u8]) -> Result<()> {
+        self.ubuf.write_all(buf)?;
+        self.pos += buf.len();
         Ok(())
     }
 
