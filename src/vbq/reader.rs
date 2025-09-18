@@ -1198,7 +1198,7 @@ impl ParallelReader for MmapReader {
             .iter()
             .filter(|r| {
                 let iv_start = r.cumulative_records as usize;
-                let iv_end = (r.cumulative_records + r.block_records) as usize;
+                let iv_end = (r.cumulative_records + r.block_records as u64) as usize;
                 iv_start < range.end && iv_end > range.start
             })
             .copied()

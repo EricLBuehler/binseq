@@ -24,7 +24,7 @@ pub const INDEX_MAGIC: u64 = 0x5845444e49514256;
 #[allow(clippy::unreadable_literal)]
 pub const INDEX_END_MAGIC: u64 = 0x444E455845444E49;
 /// Index Block Reservation
-pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
+pub const INDEX_RESERVATION: [u8; 4] = [42; 4];
 
 /// Descriptor of the dimensions of a block in a VBINSEQ file
 ///
@@ -80,13 +80,11 @@ pub struct BlockRange {
     /// This allows efficient determination of which block contains a specific record
     /// by index without scanning through all previous blocks.
     ///
-    /// (4 bytes in serialized form)
-    pub cumulative_records: u32,
+    /// (8 bytes in serialized form)
+    pub cumulative_records: u64,
 
     /// Reserved bytes for future extensions
-    ///
-    /// (8 bytes in serialized form)
-    pub reservation: [u8; 8],
+    pub reservation: [u8; 4],
 }
 impl BlockRange {
     /// Creates a new `BlockRange` with the specified parameters
@@ -111,7 +109,7 @@ impl BlockRange {
     /// let range = BlockRange::new(1024, 8192, 1000, 5000);
     /// ```
     #[must_use]
-    pub fn new(start_offset: u64, len: u64, block_records: u32, cumulative_records: u32) -> Self {
+    pub fn new(start_offset: u64, len: u64, block_records: u32, cumulative_records: u64) -> Self {
         Self {
             start_offset,
             len,
@@ -144,8 +142,8 @@ impl BlockRange {
         LittleEndian::write_u64(&mut buf[0..8], self.start_offset);
         LittleEndian::write_u64(&mut buf[8..16], self.len);
         LittleEndian::write_u32(&mut buf[16..20], self.block_records);
-        LittleEndian::write_u32(&mut buf[20..24], self.cumulative_records);
-        buf[24..].copy_from_slice(&self.reservation);
+        LittleEndian::write_u64(&mut buf[20..28], self.cumulative_records);
+        buf[28..].copy_from_slice(&self.reservation);
         writer.write_all(&buf)?;
         Ok(())
     }
@@ -169,15 +167,15 @@ impl BlockRange {
     /// - Bytes 0-7: `start_offset` (u64, little endian)
     /// - Bytes 8-15: len (u64, little endian)
     /// - Bytes 16-19: `block_records` (u32, little endian)
-    /// - Bytes 20-23: `cumulative_records` (u32, little endian)
-    /// - Bytes 24-31: reservation (ignored, default value used)
+    /// - Bytes 20-27: `cumulative_records` (u64, little endian)
+    /// - Bytes 28-31: reservation (ignored, default value used)
     #[must_use]
     pub fn from_exact(buffer: &[u8; SIZE_BLOCK_RANGE]) -> Self {
         Self {
             start_offset: LittleEndian::read_u64(&buffer[0..8]),
             len: LittleEndian::read_u64(&buffer[8..16]),
             block_records: LittleEndian::read_u32(&buffer[16..20]),
-            cumulative_records: LittleEndian::read_u32(&buffer[20..24]),
+            cumulative_records: LittleEndian::read_u64(&buffer[20..28]),
             reservation: INDEX_RESERVATION,
         }
     }
@@ -555,7 +553,7 @@ impl BlockIndex {
                 record_total,
             ));
             pos += SIZE_BLOCK_HEADER + block_header.size as usize;
-            record_total += block_header.records;
+            record_total += block_header.records as u64;
         }
 
         Ok(index)
@@ -665,7 +663,7 @@ impl BlockIndex {
         self.ranges
             .iter()
             .next_back()
-            .map(|r| (r.cumulative_records + r.block_records) as usize)
+            .map(|r| (r.cumulative_records + r.block_records as u64) as usize)
             .unwrap_or_default()
     }
 }

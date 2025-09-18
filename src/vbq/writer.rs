@@ -1123,7 +1123,7 @@ impl<W: Write> VBinseqWriter<W> {
                     self.bytes_written as u64, // Current position in main file
                     range.len,
                     range.block_records,
-                    self.records_written as u32, // Current number of records written in main file
+                    self.records_written as u64, // Current number of records written in main file
                 );
 
                 self.ranges.push(updated_range);
@@ -1146,7 +1146,7 @@ impl<W: Write> VBinseqWriter<W> {
                     self.bytes_written as u64,
                     header.size,
                     header.records,
-                    self.records_written as u32,
+                    self.records_written as u64,
                 );
                 self.ranges.push(range);
                 self.bytes_written += header.size_with_header();
@@ -1196,7 +1196,7 @@ fn impl_flush_block<W: Write>(
         *bytes_written as u64,
         block_header.size,
         block_header.records,
-        *records_written as u32,
+        *records_written as u64,
     );
     ranges.push(range);
     *bytes_written += block_header.size_with_header();
