@@ -143,7 +143,7 @@ impl BlockRange {
         LittleEndian::write_u64(&mut buf[8..16], self.len);
         LittleEndian::write_u32(&mut buf[16..20], self.block_records);
         LittleEndian::write_u64(&mut buf[20..28], self.cumulative_records);
-        buf[24..].copy_from_slice(&self.reservation);
+        buf[28..].copy_from_slice(&self.reservation);
         writer.write_all(&buf)?;
         Ok(())
     }
