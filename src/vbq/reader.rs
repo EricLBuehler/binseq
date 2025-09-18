@@ -1,3 +1,58 @@
+//! Reader implementation for VBINSEQ files
+//!
+//! This module provides functionality for reading sequence data from VBINSEQ files,
+//! including support for compressed blocks, quality scores, paired-end reads, and sequence headers.
+//!
+//! ## Format Changes (v0.7.0+)
+//!
+//! - **Embedded Index**: Readers now load the index from within VBQ files instead of separate `.vqi` files
+//! - **Headers Support**: Optional sequence headers/identifiers can be read from each record
+//! - **Multi-bit Encoding**: Support for reading 2-bit and 4-bit nucleotide encodings
+//! - **Extended Capacity**: u64 indexing supports files with more than 4 billion records
+//!
+//! ## Index Loading
+//!
+//! The reader automatically loads the embedded index from the end of VBQ files:
+//! 1. Seeks to the end of the file to read the index trailer
+//! 2. Validates the INDEX_END_MAGIC marker
+//! 3. Reads the index size and decompresses the embedded index
+//! 4. Uses the index for efficient random access and parallel processing
+//!
+//! ## Memory-Mapped Reading
+//!
+//! The `MmapReader` provides efficient access to large files through memory mapping:
+//! - Zero-copy access to file data
+//! - Efficient random access using the embedded index
+//! - Support for parallel processing across record ranges
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use binseq::vbq::MmapReader;
+//! use binseq::BinseqRecord;
+//!
+//! // Open a VBQ file (index is automatically loaded)
+//! let mut reader = MmapReader::new("example.vbq").unwrap();
+//! let mut block = reader.new_block();
+//!
+//! // Read records with headers and quality scores
+//! let mut seq_buffer = Vec::new();
+//! let mut header_buffer = Vec::new();
+//! while reader.read_block_into(&mut block).unwrap() {
+//!     for record in block.iter() {
+//!         record.decode_s(&mut seq_buffer).unwrap();
+//!         record.sheader(&mut header_buffer);
+//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
+//!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
+//!         if !record.squal().is_empty() {
+//!             println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
+//!         }
+//!         seq_buffer.clear();
+//!         header_buffer.clear();
+//!     }
+//! }
+//! ```
+
 use std::fs::File;
 use std::io::Read;
 use std::ops::Range;
@@ -44,6 +99,13 @@ fn encoded_sequence_len(len: u64, bitsize: BitSize) -> usize {
 /// The `RecordBlock` struct represents a single block of records read from a VBINSEQ file.
 /// It stores the raw data for multiple records in vectors, allowing efficient iteration
 /// over the records without copying memory for each record.
+///
+/// ## Format Support (v0.7.0+)
+///
+/// - Supports reading records with optional sequence headers
+/// - Handles both 2-bit and 4-bit nucleotide encodings
+/// - Supports quality scores and paired sequences
+/// - Compatible with both compressed and uncompressed blocks
 ///
 /// The `RecordBlock` is reused when reading blocks sequentially from a file, with its
 /// contents being cleared and replaced with each new block that is read.
@@ -702,6 +764,13 @@ impl BinseqRecord for RefRecord<'_> {
 /// [`MmapReader`] provides efficient, memory-mapped access to VBINSEQ files. It allows
 /// sequential reading of record blocks and supports parallel processing of records.
 ///
+/// ## Format Support (v0.7.0+)
+///
+/// - **Embedded Index**: Automatically loads index from within VBQ files
+/// - **Headers Support**: Reads optional sequence headers/identifiers from records
+/// - **Multi-bit Encoding**: Supports both 2-bit and 4-bit nucleotide encodings
+/// - **Extended Capacity**: u64 indexing supports files with more than 4 billion records
+///
 /// Memory mapping allows the operating system to lazily load file contents as needed,
 /// which can be more efficient than standard file I/O, especially for large files.
 ///
@@ -714,23 +783,43 @@ impl BinseqRecord for RefRecord<'_> {
 /// Each [`RecordBlock`] contains a [`BlockHeader`] and is used to access [`RefRecord`]s
 /// which implement the [`BinseqRecord`] trait.
 ///
+/// ## Index Loading
+///
+/// The reader automatically loads the embedded index by:
+/// 1. Reading the index trailer from the end of the file
+/// 2. Validating the INDEX_END_MAGIC marker
+/// 3. Decompressing the embedded index data
+/// 4. Using the index for efficient random access and parallel processing
+///
 /// # Examples
 ///
 /// ```
 /// use binseq::vbq::MmapReader;
-/// use binseq::Result;
+/// use binseq::{BinseqRecord, Result};
 ///
 /// fn main() -> Result<()> {
 ///     let path = "./data/subset.vbq";
-///     let mut reader = MmapReader::new(path)?;
+///     let mut reader = MmapReader::new(path)?; // Index loaded automatically
 ///
-///     // Create a block to hold records
+///     // Create buffers for sequence data and headers
+///     let mut seq_buffer = Vec::new();
+///     let mut header_buffer = Vec::new();
 ///     let mut block = reader.new_block();
 ///
 ///     // Read blocks sequentially
 ///     while reader.read_block_into(&mut block)? {
 ///         println!("Read a block with {} records", block.n_records());
-///         // Process records...
+///         for record in block.iter() {
+///             // Decode sequence and header
+///             record.decode_s(&mut seq_buffer)?;
+///             record.sheader(&mut header_buffer);
+///
+///             println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap_or(""));
+///             println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap_or(""));
+///
+///             seq_buffer.clear();
+///             header_buffer.clear();
+///         }
 ///     }
 ///     Ok(())
 /// }
@@ -754,9 +843,15 @@ pub struct MmapReader {
 impl MmapReader {
     /// Creates a new `MmapReader` for a VBINSEQ file
     ///
-    /// This method opens the specified file, memory-maps its contents, and reads the
-    /// VBINSEQ header information. The reader is positioned at the beginning of the first
-    /// record block after the header.
+    /// This method opens the specified file, memory-maps its contents, reads the
+    /// VBINSEQ header information, and loads the embedded index. The reader is positioned
+    /// at the beginning of the first record block after the header.
+    ///
+    /// ## Index Loading (v0.7.0+)
+    ///
+    /// The embedded index is automatically loaded from the end of the file. For legacy
+    /// files with separate `.vqi` index files, the index is automatically migrated to
+    /// the embedded format.
     ///
     /// # Parameters
     ///
