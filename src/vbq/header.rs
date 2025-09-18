@@ -168,14 +168,21 @@ pub struct VBinseqHeader {
     pub paired: bool,
 
     /// The bitsize of the sequence data (1 byte)
+    ///
+    /// Specifies the number of bits per nucleotide:
+    /// - 2-bit: Standard encoding (A=00, C=01, G=10, T=11)
+    /// - 4-bit: Extended encoding supporting ambiguous nucleotides
     pub bits: BitSize,
 
     /// Whether sequence headers are included with sequences (1 byte)
+    ///
+    /// When true, each record includes length-prefixed UTF-8 header strings
+    /// for both primary and extended (paired) sequences
     pub headers: bool,
 
     /// Reserved bytes for future format extensions
     ///
-    /// Currently filled with placeholder values (16 bytes)
+    /// Currently filled with placeholder values (14 bytes, reduced from 15 to accommodate headers flag)
     pub reserved: [u8; 14],
 }
 impl Default for VBinseqHeader {
@@ -186,6 +193,8 @@ impl Default for VBinseqHeader {
     /// - Does not include quality scores
     /// - Does not use compression
     /// - Does not support paired sequences
+    /// - Does not include sequence headers
+    /// - Uses 2-bit nucleotide encoding
     fn default() -> Self {
         Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default(), false)
     }
@@ -198,6 +207,8 @@ impl VBinseqHeader {
     /// * `qual` - Whether to include quality scores with sequences
     /// * `compressed` - Whether to use ZSTD compression for blocks
     /// * `paired` - Whether records contain paired sequences
+    /// * `bitsize` - Number of bits per nucleotide (2 or 4)
+    /// * `headers` - Whether to include sequence headers with records
     ///
     /// # Example
     ///

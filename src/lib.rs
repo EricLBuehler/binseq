@@ -6,13 +6,26 @@
 //!
 //! It offers methods to read and write BINSEQ files, providing:
 //!
-//! - Compact 2-bit encoding and decoding of nucleotide sequences through [`bitnuc`](https://docs.rs/bitnuc/latest/bitnuc/)
+//! - Compact multi-bit encoding and decoding of nucleotide sequences through [`bitnuc`](https://docs.rs/bitnuc/latest/bitnuc/)
 //! - Memory-mapped file access for efficient reading ([`bq::MmapReader`] and [`vbq::MmapReader`])
 //! - Parallel processing capabilities for arbitrary tasks through the [`ParallelProcessor`] trait.
 //! - Configurable [`Policy`] for handling invalid nucleotides
 //! - Support for both single and paired-end sequences
+//! - Optional sequence headers/identifiers (VBQ format)
 //! - Abstract [`BinseqRecord`] trait for representing records from both `.bq` and `.vbq` files.
 //! - Abstract [`BinseqReader`] enum for processing records from both `.bq` and `.vbq` files.
+//!
+//! ## Recent VBQ Format Changes (v0.7.0+)
+//!
+//! The VBQ format has undergone significant improvements:
+//!
+//! - **Embedded Index**: VBQ files now contain their index data embedded at the end of the file,
+//!   eliminating separate `.vqi` index files and improving portability.
+//! - **Headers Support**: Optional sequence identifiers/headers can be stored with each record.
+//! - **Extended Capacity**: u64 indexing supports files with more than 4 billion records.
+//! - **Multi-bit Encoding**: Support for both 2-bit and 4-bit nucleotide encodings.
+//!
+//! Legacy VBQ files are automatically migrated to the new format when accessed.
 //!
 //! ## Crate Organization
 //!

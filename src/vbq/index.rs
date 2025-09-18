@@ -1,3 +1,38 @@
+//! # VBQ Index Format
+//!
+//! This module implements the embedded index format for VBQ files.
+//!
+//! ## Format Changes (v0.7.0+)
+//!
+//! **BREAKING CHANGE**: The VBQ index is now embedded at the end of VBQ files instead of
+//! being stored in separate `.vqi` files. This improves portability and eliminates the
+//! need to manage auxiliary files.
+//!
+//! ## Embedded Index Structure
+//!
+//! The index is located at the end of the VBQ file with this layout:
+//!
+//! ```text
+//! [VBQ Data Blocks][Compressed Index][Index Size (u64)][INDEX_END_MAGIC (u64)]
+//! ```
+//!
+//! Where:
+//! - **Compressed Index**: ZSTD-compressed index data (IndexHeader + BlockRanges)
+//! - **Index Size**: 8 bytes indicating size of compressed index data
+//! - **INDEX_END_MAGIC**: 8 bytes (`0x444E455845444E49` = "INDEXEND")
+//!
+//! ## Index Contents
+//!
+//! The compressed index contains:
+//! 1. **IndexHeader** (32 bytes): Metadata about the indexed file
+//! 2. **BlockRange entries** (32 bytes each): One per data block
+//!
+//! ## Key Changes from v0.6.x
+//!
+//! - Index moved from separate `.vqi` files into VBQ files
+//! - Cumulative record counts changed from `u32` to `u64`
+//! - Support for files with more than 4 billion records
+
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Cursor, Read, Write},
@@ -33,7 +68,13 @@ pub const INDEX_RESERVATION: [u8; 4] = [42; 4];
 /// efficient random access to blocks without scanning the entire file.
 ///
 /// Block ranges are stored in a `BlockIndex` to form a complete index of a VBINSEQ file.
-/// Each range is serialized to a fixed-size 32-byte structure when stored in an index file.
+/// Each range is serialized to a fixed-size 32-byte structure when stored in the embedded index.
+///
+/// ## Format Changes (v0.7.0+)
+///
+/// - `cumulative_records` field changed from `u32` to `u64`
+/// - Supports files with more than 4 billion records
+/// - Reserved bytes reduced from 8 to 4 bytes
 ///
 /// # Examples
 ///
@@ -45,7 +86,7 @@ pub const INDEX_RESERVATION: [u8; 4] = [42; 4];
 ///     1024,                  // Starting offset in the file (bytes)
 ///     8192,                  // Length of the block (bytes)
 ///     1000,                  // Number of records in this block
-///     5000                   // Cumulative number of records up to this block
+///     5000                   // Cumulative number of records up to this block (now u64)
 /// );
 ///
 /// // Use the range information
@@ -79,6 +120,9 @@ pub struct BlockRange {
     ///
     /// This allows efficient determination of which block contains a specific record
     /// by index without scanning through all previous blocks.
+    ///
+    /// **BREAKING CHANGE (v0.7.0+)**: Changed from u32 to u64 to support files
+    /// with more than 4 billion records.
     ///
     /// (8 bytes in serialized form)
     pub cumulative_records: u64,

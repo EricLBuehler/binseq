@@ -13,7 +13,7 @@ They make use of two-bit encoding for nucleotides and are optimized for high-per
 BINSEQ currently has two flavors:
 
 1. **BQ**: (`*.bq`) files are for _fixed-length_ records **without** quality scores.
-2. **VBQ**: (`*.vbq`) files are for _variable-length_ records **with optional** quality scores.
+2. **VBQ**: (`*.vbq`) files are for _variable-length_ records **with optional** quality scores and headers.
 
 Both flavors support both single and paired sequences.
 
