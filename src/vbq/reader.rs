@@ -259,6 +259,17 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
+            // Add the primary header to the block
+            if has_header {
+                let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(s_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
+
+                let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
+                self.headers.extend_from_slice(s_header_buffer);
+                pos += s_header_length as usize;
+            }
+
             // Add the extended sequence to the block
             for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
@@ -273,26 +284,15 @@ impl RecordBlock {
                 pos += xlen as usize;
             }
 
-            if has_header {
-                // primary header
-                let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-                self.header_lengths.push(s_header_length);
-                pos += 8; // Fix: advance by 8 bytes for u64
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(x_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
 
-                let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
-                self.headers.extend_from_slice(s_header_buffer);
-                pos += s_header_length as usize;
-
-                // secondary header
-                if xlen > 0 {
-                    let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-                    self.header_lengths.push(x_header_length);
-                    pos += 8; // Fix: advance by 8 bytes for u64
-
-                    let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
-                    self.headers.extend_from_slice(x_header_buffer);
-                    pos += x_header_length as usize;
-                }
+                let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
+                self.headers.extend_from_slice(x_header_buffer);
+                pos += x_header_length as usize;
             }
         }
     }
@@ -336,7 +336,7 @@ impl RecordBlock {
             self.lens.push(slen);
             self.lens.push(xlen);
 
-            // Read the sequence and advance the position
+            // Read the primary sequence and advance the position
             let schunk = encoded_sequence_len(slen, self.bitsize);
             let schunk_bytes = schunk * 8;
             self.rbuf.resize(schunk_bytes, 0);
@@ -348,7 +348,7 @@ impl RecordBlock {
             self.rbuf.clear();
             pos += schunk_bytes;
 
-            // Add the quality score to the block
+            // Add the primary quality score to the block
             if has_quality {
                 self.rbuf.resize(slen as usize, 0);
                 decoder.read_exact(&mut self.rbuf[0..slen as usize])?;
@@ -357,30 +357,8 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
-            // Read the sequence and advance the position
-            let xchunk = encoded_sequence_len(xlen, self.bitsize);
-            let xchunk_bytes = xchunk * 8;
-            self.rbuf.resize(xchunk_bytes, 0);
-            decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
-            for chunk in self.rbuf.chunks_exact(8) {
-                let seq_part = LittleEndian::read_u64(chunk);
-                self.sequences.push(seq_part);
-            }
-            self.rbuf.clear();
-            pos += xchunk_bytes;
-
-            // Add the quality score to the block
-            if has_quality {
-                self.rbuf.resize(xlen as usize, 0);
-                decoder.read_exact(&mut self.rbuf[0..xlen as usize])?;
-                self.qualities.extend_from_slice(&self.rbuf);
-                self.rbuf.clear();
-                pos += xlen as usize;
-            }
-
-            // Add the header to the block
+            // Add the primary header to the block
             if has_header {
-                // primary header
                 self.rbuf.resize(8, 0);
                 decoder.read_exact(&mut self.rbuf[0..8])?;
                 let s_header_length = LittleEndian::read_u64(&self.rbuf);
@@ -393,22 +371,43 @@ impl RecordBlock {
                 self.headers.extend_from_slice(&self.rbuf);
                 self.rbuf.clear();
                 pos += s_header_length as usize;
+            }
 
-                // secondary header
-                if xlen > 0 {
-                    self.rbuf.resize(8, 0);
-                    decoder.read_exact(&mut self.rbuf[0..8])?;
-                    let x_header_length = LittleEndian::read_u64(&self.rbuf);
-                    self.header_lengths.push(x_header_length);
-                    self.rbuf.clear();
-                    pos += 8;
+            // Read the extended sequence and advance the position
+            let xchunk = encoded_sequence_len(xlen, self.bitsize);
+            let xchunk_bytes = xchunk * 8;
+            self.rbuf.resize(xchunk_bytes, 0);
+            decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
+            for chunk in self.rbuf.chunks_exact(8) {
+                let seq_part = LittleEndian::read_u64(chunk);
+                self.sequences.push(seq_part);
+            }
+            self.rbuf.clear();
+            pos += xchunk_bytes;
 
-                    self.rbuf.resize(x_header_length as usize, 0);
-                    decoder.read_exact(&mut self.rbuf[0..x_header_length as usize])?;
-                    self.headers.extend_from_slice(&self.rbuf);
-                    self.rbuf.clear();
-                    pos += x_header_length as usize;
-                }
+            // Add the extended quality score to the block
+            if has_quality {
+                self.rbuf.resize(xlen as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..xlen as usize])?;
+                self.qualities.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += xlen as usize;
+            }
+
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                self.rbuf.resize(8, 0);
+                decoder.read_exact(&mut self.rbuf[0..8])?;
+                let x_header_length = LittleEndian::read_u64(&self.rbuf);
+                self.header_lengths.push(x_header_length);
+                self.rbuf.clear();
+                pos += 8;
+
+                self.rbuf.resize(x_header_length as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..x_header_length as usize])?;
+                self.headers.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += x_header_length as usize;
             }
         }
         Ok(())
@@ -478,16 +477,13 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         };
 
         // Handle headers (separate position tracking)
+        let header_idx = if xlen > 0 { 2 * self.rpos } else { self.rpos };
         let mut shlen = 0;
         let s_header = if self.block.headers.is_empty() {
             &[]
         } else {
             // Get header length
-            if xlen > 0 {
-                shlen = self.block.header_lengths[2 * self.rpos];
-            } else {
-                shlen = self.block.header_lengths[self.rpos];
-            }
+            shlen = self.block.header_lengths[header_idx];
 
             // Extract header data
             let header = &self.block.headers[self.hpos..self.hpos + shlen as usize];
@@ -499,7 +495,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         let x_header = if self.block.headers.is_empty() || xlen == 0 {
             &[]
         } else {
-            xhlen = self.block.header_lengths[(2 * self.rpos) + 1];
+            xhlen = self.block.header_lengths[header_idx + 1];
             let header = &self.block.headers[self.hpos..self.hpos + xhlen as usize];
             self.hpos += xhlen as usize;
             header
@@ -664,11 +660,19 @@ impl BinseqRecord for RefRecord<'_> {
     }
     fn sheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
-        buffer.extend_from_slice(self.sheader);
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.sheader);
+        }
     }
     fn xheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
-        buffer.extend_from_slice(self.xheader);
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.xheader);
+        }
     }
     fn flag(&self) -> u64 {
         self.flag
