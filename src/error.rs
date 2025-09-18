@@ -198,6 +198,10 @@ pub enum WriteError {
     #[error("Paired flag not set in header but trying to write with record pair.")]
     PairedFlagNotSet,
 
+    /// When trying to write data without headers but the header specifies they should be present
+    #[error("Header flag is set in header but trying to write without headers.")]
+    HeaderFlagSet,
+
     /// When a record is too large to fit in a block of the configured size
     ///
     /// The first parameter is the record size, the second is the maximum block size

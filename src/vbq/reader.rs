@@ -72,6 +72,10 @@ pub struct RecordBlock {
     /// For each record, two consecutive entries are stored: primary sequence length and extended sequence length
     lens: Vec<u64>,
 
+    /// Buffer containing all header lengths in the block
+    /// For each record, two consecutive entries are stored: primary header length and extended header length
+    header_lengths: Vec<u64>,
+
     /// Buffer containing all packed nucleotide sequences in the block
     /// Nucleotides are encoded as 2-bit values (4 nucleotides per byte)
     sequences: Vec<u64>,
@@ -79,6 +83,9 @@ pub struct RecordBlock {
     /// Buffer containing all quality scores in the block
     /// Quality scores are stored as raw bytes, one byte per nucleotide
     qualities: Vec<u8>,
+
+    /// Buffer containing all headers in the block
+    headers: Vec<u8>,
 
     /// Maximum size of the block in bytes
     /// This is derived from the file header's block size field
@@ -110,8 +117,10 @@ impl RecordBlock {
             index: 0,
             flags: Vec::new(),
             lens: Vec::new(),
+            header_lengths: Vec::new(),
             sequences: Vec::new(),
             qualities: Vec::new(),
+            headers: Vec::new(),
             block_size,
             rbuf: Vec::new(),
         }
@@ -178,8 +187,10 @@ impl RecordBlock {
         self.index = 0;
         self.flags.clear();
         self.lens.clear();
+        self.header_lengths.clear();
         self.sequences.clear();
         self.qualities.clear();
+        self.headers.clear();
     }
 
     /// Ingest the bytes from a block into the record block
@@ -194,11 +205,12 @@ impl RecordBlock {
     ///
     /// * `bytes` - A slice of bytes containing the block data
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
+    /// * `has_header` - A boolean indicating whether the block contains headers
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an error
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool) {
+    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool) {
         let mut pos = 0;
         loop {
             // Check that we have enough bytes to at least read the flag
@@ -247,6 +259,17 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
+            // Add the primary header to the block
+            if has_header {
+                let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(s_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
+
+                let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
+                self.headers.extend_from_slice(s_header_buffer);
+                pos += s_header_length as usize;
+            }
+
             // Add the extended sequence to the block
             for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
@@ -260,10 +283,26 @@ impl RecordBlock {
                 self.qualities.extend_from_slice(qual_buffer);
                 pos += xlen as usize;
             }
+
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(x_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
+
+                let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
+                self.headers.extend_from_slice(x_header_buffer);
+                pos += x_header_length as usize;
+            }
         }
     }
 
-    fn ingest_compressed_bytes(&mut self, bytes: &[u8], has_quality: bool) -> Result<()> {
+    fn ingest_compressed_bytes(
+        &mut self,
+        bytes: &[u8],
+        has_quality: bool,
+        has_header: bool,
+    ) -> Result<()> {
         let mut decoder = Decoder::with_buffer(bytes)?;
 
         let mut pos = 0;
@@ -297,7 +336,7 @@ impl RecordBlock {
             self.lens.push(slen);
             self.lens.push(xlen);
 
-            // Read the sequence and advance the position
+            // Read the primary sequence and advance the position
             let schunk = encoded_sequence_len(slen, self.bitsize);
             let schunk_bytes = schunk * 8;
             self.rbuf.resize(schunk_bytes, 0);
@@ -309,7 +348,7 @@ impl RecordBlock {
             self.rbuf.clear();
             pos += schunk_bytes;
 
-            // Add the quality score to the block
+            // Add the primary quality score to the block
             if has_quality {
                 self.rbuf.resize(slen as usize, 0);
                 decoder.read_exact(&mut self.rbuf[0..slen as usize])?;
@@ -318,7 +357,23 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
-            // Read the sequence and advance the position
+            // Add the primary header to the block
+            if has_header {
+                self.rbuf.resize(8, 0);
+                decoder.read_exact(&mut self.rbuf[0..8])?;
+                let s_header_length = LittleEndian::read_u64(&self.rbuf);
+                self.header_lengths.push(s_header_length);
+                self.rbuf.clear();
+                pos += 8;
+
+                self.rbuf.resize(s_header_length as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..s_header_length as usize])?;
+                self.headers.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += s_header_length as usize;
+            }
+
+            // Read the extended sequence and advance the position
             let xchunk = encoded_sequence_len(xlen, self.bitsize);
             let xchunk_bytes = xchunk * 8;
             self.rbuf.resize(xchunk_bytes, 0);
@@ -330,13 +385,29 @@ impl RecordBlock {
             self.rbuf.clear();
             pos += xchunk_bytes;
 
-            // Add the quality score to the block
+            // Add the extended quality score to the block
             if has_quality {
                 self.rbuf.resize(xlen as usize, 0);
                 decoder.read_exact(&mut self.rbuf[0..xlen as usize])?;
                 self.qualities.extend_from_slice(&self.rbuf);
                 self.rbuf.clear();
                 pos += xlen as usize;
+            }
+
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                self.rbuf.resize(8, 0);
+                decoder.read_exact(&mut self.rbuf[0..8])?;
+                let x_header_length = LittleEndian::read_u64(&self.rbuf);
+                self.header_lengths.push(x_header_length);
+                self.rbuf.clear();
+                pos += 8;
+
+                self.rbuf.resize(x_header_length as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..x_header_length as usize])?;
+                self.headers.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += x_header_length as usize;
             }
         }
         Ok(())
@@ -349,6 +420,10 @@ pub struct RecordBlockIter<'a> {
     rpos: usize,
     /// Encoded sequence position in the block
     epos: usize,
+    /// Header position in the block
+    hpos: usize,
+    /// Quality position in the block
+    qpos: usize,
 }
 impl<'a> RecordBlockIter<'a> {
     #[must_use]
@@ -357,6 +432,8 @@ impl<'a> RecordBlockIter<'a> {
             block,
             rpos: 0,
             epos: 0,
+            hpos: 0,
+            qpos: 0,
         }
     }
 }
@@ -367,6 +444,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         if self.rpos == self.block.n_records() {
             return None;
         }
+
         let index = (self.block.index + self.rpos) as u64;
         let flag = self.block.flags[self.rpos];
         let slen = self.block.lens[2 * self.rpos];
@@ -374,21 +452,54 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         let schunk = encoded_sequence_len(slen, self.block.bitsize);
         let xchunk = encoded_sequence_len(xlen, self.block.bitsize);
 
+        // Handle sequences
         let s_seq = &self.block.sequences[self.epos..self.epos + schunk];
-        let s_qual = if self.block.qualities.is_empty() {
-            &[]
-        } else {
-            &self.block.qualities[self.epos..self.epos + slen as usize]
-        };
         self.epos += schunk;
 
         let x_seq = &self.block.sequences[self.epos..self.epos + xchunk];
+        self.epos += xchunk;
+
+        // Handle quality scores (separate position tracking)
+        let s_qual = if self.block.qualities.is_empty() {
+            &[]
+        } else {
+            let qual = &self.block.qualities[self.qpos..self.qpos + slen as usize];
+            self.qpos += slen as usize;
+            qual
+        };
+
         let x_qual = if self.block.qualities.is_empty() {
             &[]
         } else {
-            &self.block.qualities[self.epos..self.epos + xlen as usize]
+            let qual = &self.block.qualities[self.qpos..self.qpos + xlen as usize];
+            self.qpos += xlen as usize;
+            qual
         };
-        self.epos += xchunk;
+
+        // Handle headers (separate position tracking)
+        let header_idx = if xlen > 0 { 2 * self.rpos } else { self.rpos };
+        let mut shlen = 0;
+        let s_header = if self.block.headers.is_empty() {
+            &[]
+        } else {
+            // Get header length
+            shlen = self.block.header_lengths[header_idx];
+
+            // Extract header data
+            let header = &self.block.headers[self.hpos..self.hpos + shlen as usize];
+            self.hpos += shlen as usize;
+            header
+        };
+
+        let mut xhlen = 0;
+        let x_header = if self.block.headers.is_empty() || xlen == 0 {
+            &[]
+        } else {
+            xhlen = self.block.header_lengths[header_idx + 1];
+            let header = &self.block.headers[self.hpos..self.hpos + xhlen as usize];
+            self.hpos += xhlen as usize;
+            header
+        };
 
         // update record position
         self.rpos += 1;
@@ -403,6 +514,10 @@ impl<'a> Iterator for RecordBlockIter<'a> {
             x_seq,
             s_qual,
             x_qual,
+            shlen,
+            s_header,
+            xhlen,
+            x_header,
         ))
     }
 }
@@ -478,6 +593,18 @@ pub struct RefRecord<'a> {
 
     /// Quality scores for the extended/paired sequence (empty if not paired or no quality)
     xqual: &'a [u8],
+
+    /// Length of the header for the primary sequence in bytes
+    shlen: u64,
+
+    /// Header for the record
+    sheader: &'a [u8],
+
+    /// Length of the header for the extended/paired sequence in bytes
+    xhlen: u64,
+
+    /// Header for the extended/paired sequence (empty if not paired)
+    xheader: &'a [u8],
 }
 impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
@@ -492,6 +619,10 @@ impl<'a> RefRecord<'a> {
         xbuf: &'a [u64],
         squal: &'a [u8],
         xqual: &'a [u8],
+        shlen: u64,
+        sheader: &'a [u8],
+        xhlen: u64,
+        xheader: &'a [u8],
     ) -> Self {
         Self {
             bitsize,
@@ -503,7 +634,20 @@ impl<'a> RefRecord<'a> {
             xbuf,
             squal,
             xqual,
+            shlen,
+            sheader,
+            xhlen,
+            xheader,
         }
+    }
+}
+
+impl RefRecord<'_> {
+    pub fn shlen(&self) -> u64 {
+        self.shlen
+    }
+    pub fn xhlen(&self) -> u64 {
+        self.xhlen
     }
 }
 
@@ -513,6 +657,22 @@ impl BinseqRecord for RefRecord<'_> {
     }
     fn index(&self) -> u64 {
         self.index
+    }
+    fn sheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.sheader);
+        }
+    }
+    fn xheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.xheader);
+        }
     }
     fn flag(&self) -> u64 {
         self.flag
@@ -802,9 +962,9 @@ impl MmapReader {
         }
         let block_buffer = &self.mmap[self.pos..self.pos + rbound];
         if self.header.compressed {
-            block.ingest_compressed_bytes(block_buffer, self.header.qual)?;
+            block.ingest_compressed_bytes(block_buffer, self.header.qual, self.header.headers)?;
         } else {
-            block.ingest_bytes(block_buffer, self.header.qual);
+            block.ingest_bytes(block_buffer, self.header.qual, self.header.headers);
         }
 
         // Update the block index
@@ -1091,9 +1251,13 @@ impl ParallelReader for MmapReader {
 
                     // Ingest data according to the compression setting
                     if header.compressed {
-                        record_block.ingest_compressed_bytes(block_data, header.qual)?;
+                        record_block.ingest_compressed_bytes(
+                            block_data,
+                            header.qual,
+                            header.headers,
+                        )?;
                     } else {
-                        record_block.ingest_bytes(block_data, header.qual);
+                        record_block.ingest_bytes(block_data, header.qual, header.headers);
                     }
 
                     // Update the record block index
