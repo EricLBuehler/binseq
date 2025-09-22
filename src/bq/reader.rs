@@ -100,7 +100,7 @@ impl BinseqRecord for RefRecord<'_> {
         if self.config.flags {
             &self.buffer[1..=(self.config.schunk as usize)]
         } else {
-            &self.buffer[..=(self.config.schunk as usize)]
+            &self.buffer[..(self.config.schunk as usize)]
         }
     }
     fn xbuf(&self) -> &[u64] {
@@ -375,8 +375,9 @@ impl MmapReader {
         if idx > self.num_records() {
             return Err(ReadError::OutOfRange(idx, self.num_records()).into());
         }
-        let lbound = SIZE_HEADER + (idx * self.config.record_size_bytes());
-        let rbound = lbound + self.config.record_size_bytes();
+        let rsize = self.config.record_size_bytes();
+        let lbound = SIZE_HEADER + (idx * rsize);
+        let rbound = lbound + rsize;
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
         Ok(RefRecord::new(idx as u64, buffer, self.config))
