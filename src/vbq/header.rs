@@ -52,10 +52,10 @@ pub const SIZE_BLOCK_HEADER: usize = 32;
 /// A larger block size can improve compression ratio but reduces random access granularity.
 pub const BLOCK_SIZE: u64 = 128 * 1024;
 
-/// Reserved bytes for future use in the file header (16 bytes)
+/// Reserved bytes for future use in the file header
 ///
 /// These bytes are set to a placeholder value (42) and reserved for future extensions.
-pub const RESERVED_BYTES: [u8; 14] = [42; 14];
+pub const RESERVED_BYTES: [u8; 13] = [42; 13];
 
 /// Reserved bytes for future use in block headers (12 bytes)
 ///
@@ -70,6 +70,7 @@ pub struct VBinseqHeaderBuilder {
     paired: Option<bool>,
     bitsize: Option<BitSize>,
     headers: Option<bool>,
+    flags: Option<bool>,
 }
 impl VBinseqHeaderBuilder {
     #[must_use]
@@ -107,6 +108,11 @@ impl VBinseqHeaderBuilder {
         self
     }
     #[must_use]
+    pub fn flags(mut self, flags: bool) -> Self {
+        self.flags = Some(flags);
+        self
+    }
+    #[must_use]
     pub fn build(self) -> VBinseqHeader {
         VBinseqHeader::with_capacity(
             self.block.unwrap_or(BLOCK_SIZE),
@@ -115,6 +121,7 @@ impl VBinseqHeaderBuilder {
             self.paired.unwrap_or(false),
             self.bitsize.unwrap_or_default(),
             self.headers.unwrap_or(false),
+            self.flags.unwrap_or(false),
         )
     }
 }
@@ -180,10 +187,16 @@ pub struct VBinseqHeader {
     /// for both primary and extended (paired) sequences
     pub headers: bool,
 
+    /// Whether flags are included with sequences (1 byte)
+    ///
+    /// When true, each record includes length-prefixed UTF-8 flag strings
+    /// for both primary and extended (paired) sequences
+    pub flags: bool,
+
     /// Reserved bytes for future format extensions
     ///
-    /// Currently filled with placeholder values (14 bytes, reduced from 15 to accommodate headers flag)
-    pub reserved: [u8; 14],
+    /// Currently filled with placeholder values (13 bytes)
+    pub reserved: [u8; 13],
 }
 impl Default for VBinseqHeader {
     /// Creates a default header with default block size and all features disabled
@@ -196,7 +209,15 @@ impl Default for VBinseqHeader {
     /// - Does not include sequence headers
     /// - Uses 2-bit nucleotide encoding
     fn default() -> Self {
-        Self::with_capacity(BLOCK_SIZE, false, false, false, BitSize::default(), false)
+        Self::with_capacity(
+            BLOCK_SIZE,
+            false,
+            false,
+            false,
+            BitSize::default(),
+            false,
+            false,
+        )
     }
 }
 impl VBinseqHeader {
@@ -228,8 +249,11 @@ impl VBinseqHeader {
         paired: bool,
         bitsize: BitSize,
         headers: bool,
+        flags: bool,
     ) -> Self {
-        Self::with_capacity(BLOCK_SIZE, qual, compressed, paired, bitsize, headers)
+        Self::with_capacity(
+            BLOCK_SIZE, qual, compressed, paired, bitsize, headers, flags,
+        )
     }
 
     /// Creates a new VBINSEQ header with a custom block size
@@ -261,6 +285,7 @@ impl VBinseqHeader {
         paired: bool,
         bitsize: BitSize,
         headers: bool,
+        flags: bool,
     ) -> Self {
         Self {
             magic: MAGIC,
@@ -270,6 +295,7 @@ impl VBinseqHeader {
             compressed,
             paired,
             headers,
+            flags,
             bits: bitsize,
             reserved: RESERVED_BYTES,
         }
@@ -320,7 +346,8 @@ impl VBinseqHeader {
             0 | 42 => false, // backwards compatibility
             _ => true,
         };
-        let Ok(reserved) = buffer[18..32].try_into() else {
+        let flags = buffer[18] != 0;
+        let Ok(reserved) = buffer[19..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -332,6 +359,7 @@ impl VBinseqHeader {
             paired,
             bits,
             headers,
+            flags,
             reserved,
         })
     }
@@ -362,7 +390,8 @@ impl VBinseqHeader {
         buffer[15] = self.paired.into();
         buffer[16] = self.bits.into();
         buffer[17] = self.headers.into();
-        buffer[18..32].copy_from_slice(&self.reserved);
+        buffer[18] = self.flags.into();
+        buffer[19..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

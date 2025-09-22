@@ -116,7 +116,7 @@
 //! let sequence = b"ACGTACGT";
 //! let quality = b"IIIIFFFF";
 //! let header_str = b"sequence_001";
-//! writer.write_record(0, Some(header_str), sequence, Some(quality)).unwrap();
+//! writer.write_record(None, Some(header_str), sequence, Some(quality)).unwrap();
 //! writer.finish().unwrap();
 //!
 //! /*

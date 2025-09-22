@@ -272,18 +272,23 @@ impl RecordBlock {
     /// # Returns
     ///
     /// A `Result` indicating success or an error
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool) {
+    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > bytes.len() {
-                break;
-            }
-
             // Read the flag and advance the position
-            let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            pos += 8;
+            let flag = if has_flags {
+                if pos + 24 > bytes.len() {
+                    break;
+                }
+                let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                pos += 8;
+                Some(flag)
+            } else {
+                if pos + 16 > bytes.len() {
+                    break;
+                }
+                None
+            };
 
             // Read the primary length and advance the position
             let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
@@ -302,7 +307,9 @@ impl RecordBlock {
             }
 
             // Add the record to the block
-            self.flags.push(flag);
+            if let Some(flag) = flag {
+                self.flags.push(flag);
+            }
             self.lens.push(slen);
             self.lens.push(xlen);
 
@@ -364,26 +371,46 @@ impl RecordBlock {
         bytes: &[u8],
         has_quality: bool,
         has_header: bool,
+        has_flags: bool,
     ) -> Result<()> {
         let mut decoder = Decoder::with_buffer(bytes)?;
 
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > self.block_size {
-                break;
-            }
+            let (flag, slen, xlen) = if has_flags {
+                // Check that we have enough bytes to at least read the flag
+                // and lengths. If not, break out of the loop.
+                if pos + 24 > self.block_size {
+                    break;
+                }
 
-            // Pull the preambles out of the compressed block and advance the position
-            let mut preamble = [0u8; 24];
-            decoder.read_exact(&mut preamble)?;
-            pos += 24;
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 24];
+                decoder.read_exact(&mut preamble)?;
+                pos += 24;
 
-            // Read the flag + lengths
-            let flag = LittleEndian::read_u64(&preamble[0..8]);
-            let slen = LittleEndian::read_u64(&preamble[8..16]);
-            let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                // Read the flag + lengths
+                let flag = LittleEndian::read_u64(&preamble[0..8]);
+                let slen = LittleEndian::read_u64(&preamble[8..16]);
+                let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                (Some(flag), slen, xlen)
+            } else {
+                // Check that we have enough bytes to at least read the
+                // lengths. If not, break out of the loop.
+                if pos + 16 > self.block_size {
+                    break;
+                }
+
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 16];
+                decoder.read_exact(&mut preamble)?;
+                pos += 16;
+
+                // Read the flag + lengths
+                let slen = LittleEndian::read_u64(&preamble[0..8]);
+                let xlen = LittleEndian::read_u64(&preamble[8..16]);
+                (None, slen, xlen)
+            };
 
             // No more records in the block
             if slen == 0 {
@@ -394,7 +421,9 @@ impl RecordBlock {
             }
 
             // Add the record to the block
-            self.flags.push(flag);
+            if let Some(flag) = flag {
+                self.flags.push(flag);
+            }
             self.lens.push(slen);
             self.lens.push(xlen);
 
@@ -508,7 +537,11 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         }
 
         let index = (self.block.index + self.rpos) as u64;
-        let flag = self.block.flags[self.rpos];
+        let flag = if !self.block.flags.is_empty() {
+            Some(self.block.flags[self.rpos])
+        } else {
+            None
+        };
         let slen = self.block.lens[2 * self.rpos];
         let xlen = self.block.lens[(2 * self.rpos) + 1];
         let schunk = encoded_sequence_len(slen, self.block.bitsize);
@@ -636,7 +669,7 @@ pub struct RefRecord<'a> {
     index: u64,
 
     /// Flag value for this record (can be used for custom metadata)
-    flag: u64,
+    flag: Option<u64>,
 
     /// Length of the primary sequence in nucleotides
     slen: u64,
@@ -674,7 +707,7 @@ impl<'a> RefRecord<'a> {
     pub fn new(
         bitsize: BitSize,
         index: u64,
-        flag: u64,
+        flag: Option<u64>,
         slen: u64,
         xlen: u64,
         sbuf: &'a [u64],
@@ -737,7 +770,7 @@ impl BinseqRecord for RefRecord<'_> {
         }
     }
     fn flag(&self) -> Option<u64> {
-        Some(self.flag)
+        self.flag
     }
     fn slen(&self) -> u64 {
         self.slen
@@ -1057,9 +1090,19 @@ impl MmapReader {
         }
         let block_buffer = &self.mmap[self.pos..self.pos + rbound];
         if self.header.compressed {
-            block.ingest_compressed_bytes(block_buffer, self.header.qual, self.header.headers)?;
+            block.ingest_compressed_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            )?;
         } else {
-            block.ingest_bytes(block_buffer, self.header.qual, self.header.headers);
+            block.ingest_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            );
         }
 
         // Update the block index
@@ -1350,9 +1393,15 @@ impl ParallelReader for MmapReader {
                             block_data,
                             header.qual,
                             header.headers,
+                            header.flags,
                         )?;
                     } else {
-                        record_block.ingest_bytes(block_data, header.qual, header.headers);
+                        record_block.ingest_bytes(
+                            block_data,
+                            header.qual,
+                            header.headers,
+                            header.flags,
+                        );
                     }
 
                     // Update the record block index
