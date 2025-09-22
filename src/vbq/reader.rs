@@ -608,7 +608,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 ///
 /// for record in block.iter() {
 ///     // Get record metadata
-///     println!("Record {}, flag: {}", record.index(), record.flag());
+///     println!("Record {}, flag: {:?}", record.index(), record.flag());
 ///
 ///     // Decode the primary sequence
 ///     record.decode_s(&mut sequence).unwrap();
@@ -736,8 +736,8 @@ impl BinseqRecord for RefRecord<'_> {
             buffer.extend_from_slice(self.xheader);
         }
     }
-    fn flag(&self) -> u64 {
-        self.flag
+    fn flag(&self) -> Option<u64> {
+        Some(self.flag)
     }
     fn slen(&self) -> u64 {
         self.slen

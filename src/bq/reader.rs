@@ -83,8 +83,12 @@ impl BinseqRecord for RefRecord<'_> {
         buffer.clear();
         buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
     }
-    fn flag(&self) -> u64 {
-        self.buffer[0]
+    fn flag(&self) -> Option<u64> {
+        if self.config.flags {
+            Some(self.buffer[0])
+        } else {
+            None
+        }
     }
     fn slen(&self) -> u64 {
         self.config.slen
@@ -93,10 +97,18 @@ impl BinseqRecord for RefRecord<'_> {
         self.config.xlen
     }
     fn sbuf(&self) -> &[u64] {
-        &self.buffer[1..=(self.config.schunk as usize)]
+        if self.config.flags {
+            &self.buffer[1..=(self.config.schunk as usize)]
+        } else {
+            &self.buffer[..=(self.config.schunk as usize)]
+        }
     }
     fn xbuf(&self) -> &[u64] {
-        &self.buffer[1 + self.config.schunk as usize..]
+        if self.config.flags {
+            &self.buffer[1 + self.config.schunk as usize..]
+        } else {
+            &self.buffer[self.config.schunk as usize..]
+        }
     }
 }
 
@@ -120,6 +132,8 @@ pub struct RecordConfig {
     xchunk: u64,
     /// The bitsize of the record
     bitsize: BitSize,
+    /// Whether flags are present
+    flags: bool,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -132,11 +146,12 @@ impl RecordConfig {
     /// * `slen` - The length of primary sequences in the file
     /// * `xlen` - The length of secondary/extended sequences in the file
     /// * `bitsize` - The bitsize of the record
+    /// * `flags` - Whether flags are present
     ///
     /// # Returns
     ///
     /// A new `RecordConfig` instance with the specified sequence lengths
-    pub fn new(slen: usize, xlen: usize, bitsize: BitSize) -> Self {
+    pub fn new(slen: usize, xlen: usize, bitsize: BitSize, flags: bool) -> Self {
         let (schunk, xchunk) = match bitsize {
             BitSize::Two => (slen.div_ceil(32), xlen.div_ceil(32)),
             BitSize::Four => (slen.div_ceil(16), xlen.div_ceil(16)),
@@ -147,6 +162,7 @@ impl RecordConfig {
             schunk: schunk as u64,
             xchunk: xchunk as u64,
             bitsize,
+            flags,
         }
     }
 
@@ -163,7 +179,12 @@ impl RecordConfig {
     ///
     /// A new `RecordConfig` instance with the sequence lengths from the header
     pub fn from_header(header: &BinseqHeader) -> Self {
-        Self::new(header.slen as usize, header.xlen as usize, header.bits)
+        Self::new(
+            header.slen as usize,
+            header.xlen as usize,
+            header.bits,
+            header.flags,
+        )
     }
 
     /// Returns whether this record contains extended sequence data
@@ -212,7 +233,11 @@ impl RecordConfig {
     /// Returns the full record size in u64
     /// schunk + xchunk + 1 (flag)
     pub fn record_size_u64(&self) -> usize {
-        (self.schunk + self.xchunk + 1) as usize
+        if self.flags {
+            (self.schunk + self.xchunk + 1) as usize
+        } else {
+            (self.schunk + self.xchunk) as usize
+        }
     }
 }
 

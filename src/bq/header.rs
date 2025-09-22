@@ -29,13 +29,14 @@ pub const SIZE_HEADER: usize = 32;
 /// Reserved bytes in the header
 ///
 /// These bytes are reserved for future use and should be set to a consistent value.
-pub const RESERVED: [u8; 18] = [42; 18];
+pub const RESERVED: [u8; 17] = [42; 17];
 
 #[derive(Debug, Clone, Copy)]
 pub struct BinseqHeaderBuilder {
     slen: Option<u32>,
     xlen: Option<u32>,
     bitsize: Option<BitSize>,
+    flags: Option<bool>,
 }
 impl Default for BinseqHeaderBuilder {
     fn default() -> Self {
@@ -50,6 +51,7 @@ impl BinseqHeaderBuilder {
             slen: None,
             xlen: None,
             bitsize: None,
+            flags: None,
         }
     }
     #[must_use]
@@ -78,6 +80,7 @@ impl BinseqHeaderBuilder {
             },
             xlen: self.xlen.unwrap_or(0),
             bits: self.bitsize.unwrap_or_default(),
+            flags: self.flags.unwrap_or(false),
             reserved: RESERVED,
         })
     }
@@ -117,10 +120,15 @@ pub struct BinseqHeader {
     /// 1 byte
     pub bits: BitSize,
 
+    /// All records have a flag attribute
+    ///
+    /// 1 byte
+    pub flags: bool,
+
     /// Reserve remaining bytes for future use
     ///
-    /// 18 bytes
-    pub reserved: [u8; 18],
+    /// 17 bytes
+    pub reserved: [u8; 17],
 }
 impl BinseqHeader {
     /// Creates a new header with the specified sequence length
@@ -133,18 +141,20 @@ impl BinseqHeader {
     ///
     /// * `bits` - The number of bits per nucleotide (currently 2 or 4)
     /// * `slen` - The length of sequences in the file
+    /// * `flags` - The flags for the header
     ///
     /// # Returns
     ///
     /// A new `BinseqHeader` instance
     #[must_use]
-    pub fn new(bits: BitSize, slen: u32) -> Self {
+    pub fn new(bits: BitSize, slen: u32, flags: bool) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
             slen,
             xlen: 0,
             bits,
+            flags,
             reserved: RESERVED,
         }
     }
@@ -159,18 +169,20 @@ impl BinseqHeader {
     /// * `bits` - The number of bits per nucleotide (currently 2 or 4)
     /// * `slen` - The length of primary sequences in the file
     /// * `xlen` - The length of secondary/extended sequences in the file
+    /// * `flags` - The flags for the header
     ///
     /// # Returns
     ///
     /// A new `BinseqHeader` instance with extended sequence information
     #[must_use]
-    pub fn new_extended(bits: BitSize, slen: u32, xlen: u32) -> Self {
+    pub fn new_extended(bits: BitSize, slen: u32, xlen: u32, flags: bool) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
             slen,
             xlen,
             bits,
+            flags,
             reserved: RESERVED,
         }
     }
@@ -222,7 +234,8 @@ impl BinseqHeader {
             4 => BitSize::Four,
             x => return Err(HeaderError::InvalidBitSize(x).into()),
         };
-        let Ok(reserved) = buffer[14..32].try_into() else {
+        let flags = buffer[14] != 0;
+        let Ok(reserved) = buffer[15..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -231,6 +244,7 @@ impl BinseqHeader {
             slen,
             xlen,
             bits,
+            flags,
             reserved,
         })
     }
@@ -288,7 +302,8 @@ impl BinseqHeader {
         LittleEndian::write_u32(&mut buffer[5..9], self.slen);
         LittleEndian::write_u32(&mut buffer[9..13], self.xlen);
         buffer[13] = self.bits.into();
-        buffer[14..32].copy_from_slice(&self.reserved);
+        buffer[14] = self.flags.into();
+        buffer[15..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

@@ -25,7 +25,7 @@ fn server(header: BinseqHeader, sequence: &[u8]) -> Result<()> {
 
     // Write sequences in a loop
     for i in 0..10 {
-        writer.write_nucleotides(i, sequence)?;
+        writer.write_record(Some(i), sequence)?;
         println!("Server: Sent record {i}");
 
         // Simulate delay between records
@@ -65,7 +65,7 @@ fn client() -> Result<()> {
     while let Some(record) = reader.next_record() {
         let record = record?;
         println!(
-            "Client: Received record {} with flag = {}",
+            "Client: Received record {} with flag = {:?}",
             count,
             record.flag()
         );
