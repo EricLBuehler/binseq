@@ -69,10 +69,9 @@ use super::{
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
 use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC, INDEX_HEADER_SIZE};
-use crate::ParallelReader;
 use crate::{
     error::{ReadError, Result},
-    BinseqRecord, ParallelProcessor,
+    BinseqRecord, ParallelProcessor, ParallelReader,
 };
 
 /// Calculates the number of 64-bit words needed to store a nucleotide sequence of the given length
@@ -128,7 +127,7 @@ pub struct RecordBlock {
 
     /// Buffer containing all record flags in the block
     /// Each record has one flag value stored at the corresponding position
-    flags: Vec<u64>,
+    flags: Vec<Option<u64>>,
 
     /// Buffer containing all sequence lengths in the block
     /// For each record, two consecutive entries are stored: primary sequence length and extended sequence length
@@ -224,7 +223,7 @@ impl RecordBlock {
     /// ```
     #[must_use]
     #[allow(clippy::iter_without_into_iter)]
-    pub fn iter(&self) -> RecordBlockIter {
+    pub fn iter(&self) -> RecordBlockIter<'_> {
         RecordBlockIter::new(self)
     }
 
@@ -272,18 +271,23 @@ impl RecordBlock {
     /// # Returns
     ///
     /// A `Result` indicating success or an error
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool) {
+    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > bytes.len() {
-                break;
-            }
-
             // Read the flag and advance the position
-            let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            pos += 8;
+            let flag = if has_flags {
+                if pos + 24 > bytes.len() {
+                    break;
+                }
+                let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                pos += 8;
+                Some(flag)
+            } else {
+                if pos + 16 > bytes.len() {
+                    break;
+                }
+                None
+            };
 
             // Read the primary length and advance the position
             let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
@@ -364,26 +368,46 @@ impl RecordBlock {
         bytes: &[u8],
         has_quality: bool,
         has_header: bool,
+        has_flags: bool,
     ) -> Result<()> {
         let mut decoder = Decoder::with_buffer(bytes)?;
 
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > self.block_size {
-                break;
-            }
+            let (flag, slen, xlen) = if has_flags {
+                // Check that we have enough bytes to at least read the flag
+                // and lengths. If not, break out of the loop.
+                if pos + 24 > self.block_size {
+                    break;
+                }
 
-            // Pull the preambles out of the compressed block and advance the position
-            let mut preamble = [0u8; 24];
-            decoder.read_exact(&mut preamble)?;
-            pos += 24;
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 24];
+                decoder.read_exact(&mut preamble)?;
+                pos += 24;
 
-            // Read the flag + lengths
-            let flag = LittleEndian::read_u64(&preamble[0..8]);
-            let slen = LittleEndian::read_u64(&preamble[8..16]);
-            let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                // Read the flag + lengths
+                let flag = LittleEndian::read_u64(&preamble[0..8]);
+                let slen = LittleEndian::read_u64(&preamble[8..16]);
+                let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                (Some(flag), slen, xlen)
+            } else {
+                // Check that we have enough bytes to at least read the
+                // lengths. If not, break out of the loop.
+                if pos + 16 > self.block_size {
+                    break;
+                }
+
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 16];
+                decoder.read_exact(&mut preamble)?;
+                pos += 16;
+
+                // Read the flag + lengths
+                let slen = LittleEndian::read_u64(&preamble[0..8]);
+                let xlen = LittleEndian::read_u64(&preamble[8..16]);
+                (None, slen, xlen)
+            };
 
             // No more records in the block
             if slen == 0 {
@@ -608,7 +632,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 ///
 /// for record in block.iter() {
 ///     // Get record metadata
-///     println!("Record {}, flag: {}", record.index(), record.flag());
+///     println!("Record {}, flag: {:?}", record.index(), record.flag());
 ///
 ///     // Decode the primary sequence
 ///     record.decode_s(&mut sequence).unwrap();
@@ -636,7 +660,7 @@ pub struct RefRecord<'a> {
     index: u64,
 
     /// Flag value for this record (can be used for custom metadata)
-    flag: u64,
+    flag: Option<u64>,
 
     /// Length of the primary sequence in nucleotides
     slen: u64,
@@ -674,7 +698,7 @@ impl<'a> RefRecord<'a> {
     pub fn new(
         bitsize: BitSize,
         index: u64,
-        flag: u64,
+        flag: Option<u64>,
         slen: u64,
         xlen: u64,
         sbuf: &'a [u64],
@@ -736,7 +760,7 @@ impl BinseqRecord for RefRecord<'_> {
             buffer.extend_from_slice(self.xheader);
         }
     }
-    fn flag(&self) -> u64 {
+    fn flag(&self) -> Option<u64> {
         self.flag
     }
     fn slen(&self) -> u64 {
@@ -1057,9 +1081,19 @@ impl MmapReader {
         }
         let block_buffer = &self.mmap[self.pos..self.pos + rbound];
         if self.header.compressed {
-            block.ingest_compressed_bytes(block_buffer, self.header.qual, self.header.headers)?;
+            block.ingest_compressed_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            )?;
         } else {
-            block.ingest_bytes(block_buffer, self.header.qual, self.header.headers);
+            block.ingest_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            );
         }
 
         // Update the block index
@@ -1350,9 +1384,15 @@ impl ParallelReader for MmapReader {
                             block_data,
                             header.qual,
                             header.headers,
+                            header.flags,
                         )?;
                     } else {
-                        record_block.ingest_bytes(block_data, header.qual, header.headers);
+                        record_block.ingest_bytes(
+                            block_data,
+                            header.qual,
+                            header.headers,
+                            header.flags,
+                        );
                     }
 
                     // Update the record block index

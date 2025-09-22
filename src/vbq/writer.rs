@@ -39,6 +39,7 @@
 //!     .qual(true)
 //!     .compressed(true)
 //!     .headers(true)
+//!     .flags(true)
 //!     .build();
 //!
 //! let mut writer = VBinseqWriterBuilder::default()
@@ -50,7 +51,7 @@
 //! let sequence = b"ACGTACGTACGT";
 //! let quality = b"IIIIIIIIIIII";
 //! let header_str = b"sequence_001";
-//! writer.write_record(0, Some(header_str), sequence, Some(quality)).unwrap();
+//! writer.write_record(Some(0), Some(header_str), sequence, Some(quality)).unwrap();
 //!
 //! // Must call finish() to write the embedded index
 //! writer.finish().unwrap();
@@ -90,8 +91,8 @@ use crate::vbq::{BlockIndex, BlockRange};
 /// # Returns
 ///
 /// The total size in bytes needed to store the record
-pub fn record_byte_size(schunk: usize, xchunk: usize) -> usize {
-    8 * (schunk + xchunk + 3)
+pub fn record_byte_size(schunk: usize, xchunk: usize, has_flags: bool) -> usize {
+    8 * (schunk + xchunk + if has_flags { 3 } else { 2 })
 }
 
 fn record_byte_size_quality_header(
@@ -101,11 +102,12 @@ fn record_byte_size_quality_header(
     xqual: usize,
     sheader: usize,
     xheader: usize,
+    has_flags: bool,
 ) -> usize {
     // counting the header length bytes (u64)
     let bytes_sheader = if sheader > 0 { sheader + 8 } else { 0 };
     let bytes_xheader = if xheader > 0 { xheader + 8 } else { 0 };
-    record_byte_size(schunk, xchunk) + squal + xqual + bytes_sheader + bytes_xheader
+    record_byte_size(schunk, xchunk, has_flags) + squal + xqual + bytes_sheader + bytes_xheader
 }
 
 /// A builder for creating configured `VBinseqWriter` instances
@@ -310,9 +312,8 @@ impl VBinseqWriterBuilder {
 ///     .unwrap();
 ///
 /// // Write a sequence
-/// let flag = 0; // No special flags
 /// let sequence = b"ACGTACGTACGT";
-/// writer.write_record(flag, None, sequence, None).unwrap();
+/// writer.write_record(None, None, sequence, None).unwrap();
 ///
 /// // Writer automatically flushes when dropped
 /// ```
@@ -348,7 +349,7 @@ impl<W: Write> VBinseqWriter<W> {
             inner,
             header,
             encoder: Encoder::with_policy(header.bits, policy),
-            cblock: BlockWriter::new(header.block as usize, header.compressed),
+            cblock: BlockWriter::new(header.block as usize, header.compressed, header.flags),
             ranges: Vec::new(),
             bytes_written: 0,
             records_written: 0,
@@ -446,7 +447,7 @@ impl<W: Write> VBinseqWriter<W> {
 
     pub fn write_record(
         &mut self,
-        flag: u64,
+        flag: Option<u64>,
         header: Option<&[u8]>,
         sequence: &[u8],
         quality: Option<&[u8]>,
@@ -482,6 +483,7 @@ impl<W: Write> VBinseqWriter<W> {
                 0,
                 header.map(|x| x.len()).unwrap_or(0),
                 0,
+                self.header.flags,
             );
             if self.cblock.exceeds_block_size(record_size)? {
                 impl_flush_block(
@@ -516,7 +518,7 @@ impl<W: Write> VBinseqWriter<W> {
 
     pub fn write_paired_record(
         &mut self,
-        flag: u64,
+        flag: Option<u64>,
         s_header: Option<&[u8]>,
         s_sequence: &[u8],
         s_qual: Option<&[u8]>,
@@ -569,6 +571,7 @@ impl<W: Write> VBinseqWriter<W> {
                 x_qual.map(|x| x.len()).unwrap_or(0),
                 s_header.map(|x| x.len()).unwrap_or(0),
                 x_header.map(|x| x.len()).unwrap_or(0),
+                self.header.flags,
             );
             if self.cblock.exceeds_block_size(record_size)? {
                 impl_flush_block(
@@ -626,7 +629,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///
     /// // Write some sequences...
     /// let sequence = b"ACGTACGTACGT";
-    /// writer.write_record(0, None, sequence, None).unwrap();
+    /// writer.write_record(None, None, sequence, None).unwrap();
     ///
     /// // Manually finish and check for errors
     /// if let Err(e) = writer.finish() {
@@ -701,7 +704,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///     .unwrap();
     ///
     /// // Write some data to the memory writer
-    /// mem_writer.write_record(0, None, b"ACGTACGT", None).unwrap();
+    /// mem_writer.write_record(None, None, b"ACGTACGT", None).unwrap();
     ///
     /// // Ingest data from memory writer into file writer
     /// file_writer.ingest(&mut mem_writer).unwrap();
@@ -833,9 +836,11 @@ struct BlockWriter {
     /// Compression flag
     /// If false, the block is written uncompressed
     compress: bool,
+    /// Has flags
+    has_flags: bool,
 }
 impl BlockWriter {
-    fn new(block_size: usize, compress: bool) -> Self {
+    fn new(block_size: usize, compress: bool, has_flags: bool) -> Self {
         Self {
             pos: 0,
             starts: Vec::default(),
@@ -845,6 +850,7 @@ impl BlockWriter {
             zbuf: Vec::with_capacity(block_size),
             padding: vec![0; block_size],
             compress,
+            has_flags,
         }
     }
 
@@ -862,7 +868,7 @@ impl BlockWriter {
     #[allow(clippy::too_many_arguments)]
     fn write_record(
         &mut self,
-        flag: u64,
+        flag: Option<u64>,
         slen: u64,
         xlen: u64,
         sbuf: &[u64],
@@ -876,7 +882,9 @@ impl BlockWriter {
         self.starts.push(self.pos);
 
         // Write the flag
-        self.write_flag(flag)?;
+        if self.has_flags {
+            self.write_flag(flag.unwrap_or(0))?;
+        }
 
         // Write the lengths
         self.write_length(slen)?;
@@ -1240,10 +1248,10 @@ mod tests {
         // Write a single sequence
         let seq = b"ACGTACGTACGT";
         source.write_record(
-            1,    // flag
-            None, // header
-            seq,  // sequence
-            None, // quality
+            Some(1), // flag
+            None,    // header
+            seq,     // sequence
+            None,    // quality
         )?;
 
         // We have not crossed a boundary
@@ -1291,7 +1299,7 @@ mod tests {
         // Write multiple sequences
         for _ in 0..30 {
             let seq = b"ACGTACGTACGT";
-            source.write_record(1, None, seq, None)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
         // We have not crossed a boundary
         assert!(source.by_ref().is_empty());
@@ -1338,7 +1346,7 @@ mod tests {
         // Write multiple sequences (will cross boundary)
         for _ in 0..30000 {
             let seq = b"ACGTACGTACGT";
-            source.write_record(1, None, seq, None)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
 
         // We have crossed a boundary
@@ -1389,7 +1397,7 @@ mod tests {
             let seq = b"ACGTACGTACGT";
             // Simple quality scores (all the same for this test)
             let qual = vec![40; seq.len()];
-            source.write_record(i, None, seq, Some(&qual))?;
+            source.write_record(Some(i), None, seq, Some(&qual))?;
         }
 
         // Create a destination writer
@@ -1426,7 +1434,7 @@ mod tests {
         // Write multiple sequences (will cross boundary)
         for _ in 0..30000 {
             let seq = b"ACGTACGTACGT";
-            source.write_record(1, None, seq, None)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
 
         // Create a destination writer
@@ -1483,10 +1491,10 @@ mod tests {
     #[test]
     #[allow(clippy::identity_op)]
     fn test_record_byte_size() {
-        let size = record_byte_size(2, 0);
+        let size = record_byte_size(2, 0, true);
         assert_eq!(size, 8 * (2 + 0 + 3)); // 40 bytes
 
-        let size = record_byte_size(4, 8);
+        let size = record_byte_size(4, 8, true);
         assert_eq!(size, 8 * (4 + 8 + 3)); // 128 bytes
     }
 }

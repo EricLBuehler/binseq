@@ -351,10 +351,9 @@ impl<W: Write> BinseqWriter<W> {
         })
     }
 
-    /// Writes a single nucleotide sequence to the output
+    /// Writes a single record to the output
     ///
     /// This method encodes and writes a primary sequence along with an associated flag.
-    /// The sequence must match the length specified in the header.
     ///
     /// # Arguments
     ///
@@ -363,51 +362,46 @@ impl<W: Write> BinseqWriter<W> {
     ///
     /// # Returns
     ///
-    /// * `Ok(true)` - If the sequence was successfully written
-    /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// * The sequence length doesn't match the header
-    /// * Writing to the underlying writer fails
-    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
+    /// * `Ok(true)` if the record was written successfully
+    /// * `Ok(false)` if the record was not written because it was empty
+    /// * `Err(WriteError::FlagSet)` if the flag is set but no flag value is provided
+    pub fn write_record(&mut self, flag: Option<u64>, primary: &[u8]) -> Result<bool> {
+        let has_flag = self.encoder.header.flags;
         if let Some(sbuffer) = self.encoder.encode_single(primary)? {
-            write_flag(&mut self.inner, flag)?;
-            write_buffer(&mut self.inner, sbuffer)?;
+            if has_flag {
+                write_flag(&mut self.inner, flag.unwrap_or(0))?;
+            }
+            write_buffer(&mut self.inner, &sbuffer)?;
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    /// Writes a pair of nucleotide sequences to the output
+    /// Writes a paired record to the output
     ///
-    /// This method encodes and writes both a primary sequence and an extended sequence
-    /// (e.g., quality scores) along with an associated flag. Both sequences must
-    /// match their respective lengths specified in the header.
+    /// This method writes a paired record to the output. It takes a flag, primary sequence, and extended sequence as input.
+    /// If the flag is set but no flag value is provided, it returns an error.
+    /// Otherwise, it writes the encoded single and extended sequences to the output and returns true.
     ///
     /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequences
-    /// * `primary` - The primary nucleotide sequence
-    /// * `extended` - The extended sequence (e.g., quality scores)
+    /// * `flag` - The flag value to write to the output
+    /// * `primary` - The primary sequence to encode and write to the output
+    /// * `extended` - The extended sequence to encode and write to the output
     ///
     /// # Returns
-    ///
-    /// * `Ok(true)` - If both sequences were successfully written
-    /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// * Either sequence length doesn't match the header
-    /// * Writing to the underlying writer fails
-    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
+    /// * `Result<bool>` - A result indicating whether the write was successful or not
+    pub fn write_paired_record(
+        &mut self,
+        flag: Option<u64>,
+        primary: &[u8],
+        extended: &[u8],
+    ) -> Result<bool> {
+        let has_flag = self.encoder.header.flags;
         if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
-            write_flag(&mut self.inner, flag)?;
+            if has_flag {
+                write_flag(&mut self.inner, flag.unwrap_or(0))?;
+            }
             write_buffer(&mut self.inner, sbuffer)?;
             write_buffer(&mut self.inner, xbuffer)?;
             Ok(true)
@@ -576,44 +570,17 @@ impl<W: Write> StreamWriter<W> {
         Ok(Self { writer })
     }
 
-    /// Writes a single nucleotide sequence to the output
-    ///
-    /// This method encodes and writes a primary sequence along with an associated flag.
-    /// The sequence must match the length specified in the header.
-    ///
-    /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequence
-    /// * `primary` - The nucleotide sequence to write
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequence was successfully written
-    /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
-        self.writer.write_nucleotides(flag, primary)
+    pub fn write_record(&mut self, flag: Option<u64>, primary: &[u8]) -> Result<bool> {
+        self.writer.write_record(flag, primary)
     }
 
-    /// Writes a pair of nucleotide sequences to the output
-    ///
-    /// This method encodes and writes both a primary sequence and an extended sequence
-    /// (e.g., quality scores) along with an associated flag. Both sequences must
-    /// match their respective lengths specified in the header.
-    ///
-    /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequences
-    /// * `primary` - The primary nucleotide sequence
-    /// * `extended` - The extended sequence (e.g., quality scores)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If both sequences were successfully written
-    /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
-        self.writer.write_paired(flag, primary, extended)
+    pub fn write_paired_record(
+        &mut self,
+        flag: Option<u64>,
+        primary: &[u8],
+        extended: &[u8],
+    ) -> Result<bool> {
+        self.writer.write_paired_record(flag, primary, extended)
     }
 
     /// Flushes any buffered data to the underlying writer

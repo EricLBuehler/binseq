@@ -127,7 +127,7 @@ fn write_single(binseq_path: &str, num_seq: usize, seq_size: usize) -> Result<()
     let mut rng = rand::rng();
     for _ in 0..num_seq {
         sequence.fill_buffer(&mut rng, seq_size);
-        if !writer.write_nucleotides(0, sequence.bytes())? {
+        if !writer.write_record(Some(0), sequence.bytes())? {
             bail!("Error writing nucleotides")
         }
     }
@@ -155,7 +155,7 @@ fn write_paired(binseq_path: &str, num_seq: usize, r1_size: usize, r2_size: usiz
         r1.fill_buffer(&mut rng, r1_size);
         r2.fill_buffer(&mut rng, r2_size);
 
-        if !writer.write_paired(0, r1.bytes(), r2.bytes())? {
+        if !writer.write_paired_record(Some(0), r1.bytes(), r2.bytes())? {
             bail!("Error writing nucleotides")
         }
     }

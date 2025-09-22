@@ -63,7 +63,7 @@
 //! let flag = 0;
 //!
 //! // Write the sequence to the file
-//! writer.write_nucleotides(flag, &seq).unwrap();
+//! writer.write_record(Some(flag), &seq).unwrap();
 //!
 //! // Close the file
 //! writer.flush().unwrap();
@@ -99,7 +99,7 @@
 //! let flag = 0;
 //!
 //! // Write the sequence to the file
-//! writer.write_paired(flag, &primary, &secondary).unwrap();
+//! writer.write_paired_record(Some(flag), &primary, &secondary).unwrap();
 //!
 //! // Close the file
 //! writer.flush().unwrap();
@@ -127,7 +127,7 @@
 //!
 //!     // Write sequences
 //!     let sequence = b"ACGT".repeat(25); // 100 nucleotides
-//!     writer.write_nucleotides(0, &sequence)?;
+//!     writer.write_record(Some(0), &sequence)?;
 //!
 //!     // Get the inner buffer
 //!     let buffer = writer.into_inner()?;
@@ -238,10 +238,8 @@
 
 mod header;
 mod reader;
-mod utils;
 mod writer;
 
 pub use header::{BinseqHeader, BinseqHeaderBuilder, SIZE_HEADER};
 pub use reader::{MmapReader, RefRecord, StreamReader};
-pub use utils::expected_file_size;
 pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder, StreamWriter, StreamWriterBuilder};

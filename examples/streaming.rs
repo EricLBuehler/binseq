@@ -18,10 +18,10 @@ fn main() -> Result<()> {
         .build(Cursor::new(Vec::new()))?;
 
     // Write the sequence with flag 0
-    writer.write_nucleotides(0, &sequence)?;
+    writer.write_record(Some(0), &sequence)?;
 
     // Write the sequence with flag 1
-    writer.write_nucleotides(1, &sequence)?;
+    writer.write_record(Some(1), &sequence)?;
 
     // Flush and get the buffer
     let buffer = writer.into_inner()?;
@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     let mut count = 0;
     while let Some(record) = reader.next_record() {
         let record = record?;
-        println!("Record {}: flag = {}", count, record.flag());
+        println!("Record {}: flag = {:?}", count, record.flag());
         count += 1;
     }
 
