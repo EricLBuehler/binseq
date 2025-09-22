@@ -20,7 +20,7 @@ pub trait BinseqRecord {
     fn index(&self) -> u64;
 
     /// Returns the flag value of this record
-    fn flag(&self) -> u64;
+    fn flag(&self) -> Option<u64>;
 
     /// Fills a buffer with the header of this record.
     fn sheader(&self, buffer: &mut Vec<u8>);
