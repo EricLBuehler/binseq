@@ -224,7 +224,7 @@ impl RecordBlock {
     /// ```
     #[must_use]
     #[allow(clippy::iter_without_into_iter)]
-    pub fn iter(&self) -> RecordBlockIter {
+    pub fn iter(&self) -> RecordBlockIter<'_> {
         RecordBlockIter::new(self)
     }
 

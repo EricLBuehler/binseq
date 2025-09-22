@@ -346,7 +346,7 @@ impl MmapReader {
     /// # Errors
     ///
     /// Returns an error if the requested index is beyond the number of records in the file
-    pub fn get(&self, idx: usize) -> Result<RefRecord> {
+    pub fn get(&self, idx: usize) -> Result<RefRecord<'_>> {
         if idx > self.num_records() {
             return Err(ReadError::OutOfRange(idx, self.num_records()).into());
         }
@@ -531,7 +531,7 @@ impl<R: Read> StreamReader<R> {
     /// * There is an I/O error when reading from the source
     /// * The header has not been read yet
     /// * The data format is invalid
-    pub fn next_record(&mut self) -> Option<Result<RefRecord>> {
+    pub fn next_record(&mut self) -> Option<Result<RefRecord<'_>>> {
         // Ensure header is read
         if self.header.is_none() {
             if let Some(e) = self.read_header().err() {
