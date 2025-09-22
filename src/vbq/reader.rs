@@ -69,10 +69,9 @@ use super::{
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
 use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC, INDEX_HEADER_SIZE};
-use crate::ParallelReader;
 use crate::{
     error::{ReadError, Result},
-    BinseqRecord, ParallelProcessor,
+    BinseqRecord, ParallelProcessor, ParallelReader,
 };
 
 /// Calculates the number of 64-bit words needed to store a nucleotide sequence of the given length
@@ -128,7 +127,7 @@ pub struct RecordBlock {
 
     /// Buffer containing all record flags in the block
     /// Each record has one flag value stored at the corresponding position
-    flags: Vec<u64>,
+    flags: Vec<Option<u64>>,
 
     /// Buffer containing all sequence lengths in the block
     /// For each record, two consecutive entries are stored: primary sequence length and extended sequence length
@@ -307,9 +306,7 @@ impl RecordBlock {
             }
 
             // Add the record to the block
-            if let Some(flag) = flag {
-                self.flags.push(flag);
-            }
+            self.flags.push(flag);
             self.lens.push(slen);
             self.lens.push(xlen);
 
@@ -421,9 +418,7 @@ impl RecordBlock {
             }
 
             // Add the record to the block
-            if let Some(flag) = flag {
-                self.flags.push(flag);
-            }
+            self.flags.push(flag);
             self.lens.push(slen);
             self.lens.push(xlen);
 
@@ -537,11 +532,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         }
 
         let index = (self.block.index + self.rpos) as u64;
-        let flag = if !self.block.flags.is_empty() {
-            Some(self.block.flags[self.rpos])
-        } else {
-            None
-        };
+        let flag = self.block.flags[self.rpos];
         let slen = self.block.lens[2 * self.rpos];
         let xlen = self.block.lens[(2 * self.rpos) + 1];
         let schunk = encoded_sequence_len(slen, self.block.bitsize);
