@@ -69,6 +69,11 @@ impl BinseqHeaderBuilder {
         self.bitsize = Some(bitsize);
         self
     }
+    #[must_use]
+    pub fn flags(mut self, flags: bool) -> Self {
+        self.flags = Some(flags);
+        self
+    }
     pub fn build(self) -> Result<BinseqHeader> {
         Ok(BinseqHeader {
             magic: MAGIC,
