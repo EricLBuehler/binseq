@@ -95,8 +95,8 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, Encoder};
-    /// let header = BinseqHeader::new(100); // For sequences of length 100
+    /// # use binseq::bq::{BinseqHeaderBuilder, Encoder};
+    /// let header = BinseqHeaderBuilder::new().slen(100).build().unwrap();
     /// let encoder = Encoder::new(header);
     /// ```
     #[must_use]
@@ -114,9 +114,9 @@ impl Encoder {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, Encoder};
+    /// # use binseq::bq::{BinseqHeaderBuilder, Encoder};
     /// # use binseq::Policy;
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build().unwrap();
     /// let encoder = Encoder::with_policy(header, Policy::SetToA);
     /// ```
     #[must_use]
@@ -146,13 +146,13 @@ impl Encoder {
 
         // Fill the buffer with the 2-bit representation of the nucleotides
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err() {
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -185,8 +185,12 @@ impl Encoder {
         }
 
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err()
-            || bitnuc::encode(extended, &mut self.xbuffer).is_err()
+        if self.header.bits.encode(primary, &mut self.sbuffer).is_err()
+            || self
+                .header
+                .bits
+                .encode(extended, &mut self.xbuffer)
+                .is_err()
         {
             self.clear();
             if self
@@ -196,8 +200,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
+                self.header.bits.encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.header.bits.encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -225,9 +229,9 @@ impl Encoder {
 ///
 /// ```
 /// # use binseq::{Policy, Result};
-/// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+/// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriterBuilder};
 /// # fn main() -> Result<()> {
-/// let header = BinseqHeader::new(100);
+/// let header = BinseqHeaderBuilder::new().slen(100).build()?;
 /// let writer = BinseqWriterBuilder::default()
 ///     .header(header)
 ///     .policy(Policy::SetToA)
@@ -323,10 +327,10 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, BinseqWriter};
+    /// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriter};
     /// # use binseq::{Result, Policy};
     /// # fn main() -> Result<()> {
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build()?;
     /// let writer = BinseqWriter::new(
     ///     Vec::new(),
     ///     header,
@@ -347,10 +351,9 @@ impl<W: Write> BinseqWriter<W> {
         })
     }
 
-    /// Writes a single nucleotide sequence to the output
+    /// Writes a single record to the output
     ///
     /// This method encodes and writes a primary sequence along with an associated flag.
-    /// The sequence must match the length specified in the header.
     ///
     /// # Arguments
     ///
@@ -359,51 +362,46 @@ impl<W: Write> BinseqWriter<W> {
     ///
     /// # Returns
     ///
-    /// * `Ok(true)` - If the sequence was successfully written
-    /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// * The sequence length doesn't match the header
-    /// * Writing to the underlying writer fails
-    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
+    /// * `Ok(true)` if the record was written successfully
+    /// * `Ok(false)` if the record was not written because it was empty
+    /// * `Err(WriteError::FlagSet)` if the flag is set but no flag value is provided
+    pub fn write_record(&mut self, flag: Option<u64>, primary: &[u8]) -> Result<bool> {
+        let has_flag = self.encoder.header.flags;
         if let Some(sbuffer) = self.encoder.encode_single(primary)? {
-            write_flag(&mut self.inner, flag)?;
-            write_buffer(&mut self.inner, sbuffer)?;
+            if has_flag {
+                write_flag(&mut self.inner, flag.unwrap_or(0))?;
+            }
+            write_buffer(&mut self.inner, &sbuffer)?;
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    /// Writes a pair of nucleotide sequences to the output
+    /// Writes a paired record to the output
     ///
-    /// This method encodes and writes both a primary sequence and an extended sequence
-    /// (e.g., quality scores) along with an associated flag. Both sequences must
-    /// match their respective lengths specified in the header.
+    /// This method writes a paired record to the output. It takes a flag, primary sequence, and extended sequence as input.
+    /// If the flag is set but no flag value is provided, it returns an error.
+    /// Otherwise, it writes the encoded single and extended sequences to the output and returns true.
     ///
     /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequences
-    /// * `primary` - The primary nucleotide sequence
-    /// * `extended` - The extended sequence (e.g., quality scores)
+    /// * `flag` - The flag value to write to the output
+    /// * `primary` - The primary sequence to encode and write to the output
+    /// * `extended` - The extended sequence to encode and write to the output
     ///
     /// # Returns
-    ///
-    /// * `Ok(true)` - If both sequences were successfully written
-    /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// * Either sequence length doesn't match the header
-    /// * Writing to the underlying writer fails
-    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
+    /// * `Result<bool>` - A result indicating whether the write was successful or not
+    pub fn write_paired_record(
+        &mut self,
+        flag: Option<u64>,
+        primary: &[u8],
+        extended: &[u8],
+    ) -> Result<bool> {
+        let has_flag = self.encoder.header.flags;
         if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
-            write_flag(&mut self.inner, flag)?;
+            if has_flag {
+                write_flag(&mut self.inner, flag.unwrap_or(0))?;
+            }
             write_buffer(&mut self.inner, sbuffer)?;
             write_buffer(&mut self.inner, xbuffer)?;
             Ok(true)
@@ -420,10 +418,10 @@ impl<W: Write> BinseqWriter<W> {
     /// # Examples
     ///
     /// ```
-    /// # use binseq::bq::{BinseqHeader, BinseqWriterBuilder};
+    /// # use binseq::bq::{BinseqHeaderBuilder, BinseqWriterBuilder};
     /// # use binseq::Result;
     /// # fn main() -> Result<()> {
-    /// let header = BinseqHeader::new(100);
+    /// let header = BinseqHeaderBuilder::new().slen(100).build()?;
     /// let writer = BinseqWriterBuilder::default()
     ///     .header(header)
     ///     .build(Vec::new())?;
@@ -572,44 +570,17 @@ impl<W: Write> StreamWriter<W> {
         Ok(Self { writer })
     }
 
-    /// Writes a single nucleotide sequence to the output
-    ///
-    /// This method encodes and writes a primary sequence along with an associated flag.
-    /// The sequence must match the length specified in the header.
-    ///
-    /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequence
-    /// * `primary` - The nucleotide sequence to write
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequence was successfully written
-    /// * `Ok(false)` - If the sequence was skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    pub fn write_nucleotides(&mut self, flag: u64, primary: &[u8]) -> Result<bool> {
-        self.writer.write_nucleotides(flag, primary)
+    pub fn write_record(&mut self, flag: Option<u64>, primary: &[u8]) -> Result<bool> {
+        self.writer.write_record(flag, primary)
     }
 
-    /// Writes a pair of nucleotide sequences to the output
-    ///
-    /// This method encodes and writes both a primary sequence and an extended sequence
-    /// (e.g., quality scores) along with an associated flag. Both sequences must
-    /// match their respective lengths specified in the header.
-    ///
-    /// # Arguments
-    ///
-    /// * `flag` - A 64-bit flag value associated with the sequences
-    /// * `primary` - The primary nucleotide sequence
-    /// * `extended` - The extended sequence (e.g., quality scores)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If both sequences were successfully written
-    /// * `Ok(false)` - If the sequences were skipped due to invalid nucleotides
-    /// * `Err(Error)` - If an error occurred during writing
-    pub fn write_paired(&mut self, flag: u64, primary: &[u8], extended: &[u8]) -> Result<bool> {
-        self.writer.write_paired(flag, primary, extended)
+    pub fn write_paired_record(
+        &mut self,
+        flag: Option<u64>,
+        primary: &[u8],
+        extended: &[u8],
+    ) -> Result<bool> {
+        self.writer.write_paired_record(flag, primary, extended)
     }
 
     /// Flushes any buffered data to the underlying writer
@@ -719,13 +690,13 @@ mod testing {
     use std::{fs::File, io::BufWriter};
 
     use super::*;
-    use crate::bq::SIZE_HEADER;
+    use crate::bq::{BinseqHeaderBuilder, SIZE_HEADER};
 
     #[test]
     fn test_headless() -> Result<()> {
         let inner = Vec::new();
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .headless(true)
             .build(inner)?;
         assert!(writer.is_headless());
@@ -738,7 +709,7 @@ mod testing {
     fn test_not_headless() -> Result<()> {
         let inner = Vec::new();
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(inner)?;
         assert!(!writer.is_headless());
         let inner = writer.by_ref();
@@ -749,7 +720,7 @@ mod testing {
     #[test]
     fn test_stdout() -> Result<()> {
         let writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(std::io::stdout())?;
         assert!(!writer.is_headless());
         Ok(())
@@ -760,7 +731,7 @@ mod testing {
         let path = "test_to_path.file";
         let inner = File::create(path).map(BufWriter::new)?;
         let mut writer = BinseqWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .build(inner)?;
         assert!(!writer.is_headless());
         let inner = writer.by_ref();
@@ -776,7 +747,7 @@ mod testing {
     fn test_stream_writer() -> Result<()> {
         let inner = Vec::new();
         let writer = StreamWriterBuilder::default()
-            .header(BinseqHeader::new(32))
+            .header(BinseqHeaderBuilder::new().slen(32).build()?)
             .buffer_capacity(16384)
             .build(inner)?;
 

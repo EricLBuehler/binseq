@@ -1,6 +1,6 @@
 [package]
 name = "binseq"
-version = "0.6.5"
+version = "0.7.5"
 edition = "2021"
 description = "A high efficiency binary format for sequencing data"
 license = "MIT"
@@ -13,9 +13,10 @@ keywords = ["bioinformatics", "nucleotide", "sequencing", "genomics", "fastq"]
 [dependencies]
 anyhow = "1.0.94"
 auto_impl = "1.3.0"
-bitnuc = "0.2.11"
+bitnuc = "0.3.0"
 bytemuck = "1.21.0"
 byteorder = "1.5.0"
+itoa = "1.0.14"
 memmap2 = "0.9.5"
 num_cpus = "1.17.0"
 rand = { version = "0.9.1", features = ["small_rng"] }

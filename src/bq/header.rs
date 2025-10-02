@@ -4,10 +4,11 @@
 //! The header contains metadata about the binary sequence data, including format version,
 //! sequence length, and other information necessary for proper interpretation of the data.
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 
-use crate::error::{HeaderError, Result};
+use crate::error::{BuilderError, HeaderError, Result};
 
 /// Current magic number: "BSEQ" in ASCII (in little-endian byte order)
 ///
@@ -24,6 +25,71 @@ const FORMAT: u8 = 1;
 ///
 /// The header has a fixed size to ensure consistent reading and writing of binary sequence files.
 pub const SIZE_HEADER: usize = 32;
+
+/// Reserved bytes in the header
+///
+/// These bytes are reserved for future use and should be set to a consistent value.
+pub const RESERVED: [u8; 17] = [42; 17];
+
+#[derive(Debug, Clone, Copy)]
+pub struct BinseqHeaderBuilder {
+    slen: Option<u32>,
+    xlen: Option<u32>,
+    bitsize: Option<BitSize>,
+    flags: Option<bool>,
+}
+impl Default for BinseqHeaderBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BinseqHeaderBuilder {
+    #[must_use]
+    pub fn new() -> Self {
+        BinseqHeaderBuilder {
+            slen: None,
+            xlen: None,
+            bitsize: None,
+            flags: None,
+        }
+    }
+    #[must_use]
+    pub fn slen(mut self, slen: u32) -> Self {
+        self.slen = Some(slen);
+        self
+    }
+    #[must_use]
+    pub fn xlen(mut self, xlen: u32) -> Self {
+        self.xlen = Some(xlen);
+        self
+    }
+    #[must_use]
+    pub fn bitsize(mut self, bitsize: BitSize) -> Self {
+        self.bitsize = Some(bitsize);
+        self
+    }
+    #[must_use]
+    pub fn flags(mut self, flags: bool) -> Self {
+        self.flags = Some(flags);
+        self
+    }
+    pub fn build(self) -> Result<BinseqHeader> {
+        Ok(BinseqHeader {
+            magic: MAGIC,
+            format: FORMAT,
+            slen: if let Some(slen) = self.slen {
+                slen
+            } else {
+                return Err(BuilderError::MissingSlen.into());
+            },
+            xlen: self.xlen.unwrap_or(0),
+            bits: self.bitsize.unwrap_or_default(),
+            flags: self.flags.unwrap_or(false),
+            reserved: RESERVED,
+        })
+    }
+}
 
 /// Header structure for binary sequence files
 ///
@@ -54,10 +120,20 @@ pub struct BinseqHeader {
     /// 4 bytes
     pub xlen: u32,
 
+    /// Number of bits per nucleotide (currently 2 or 4)
+    ///
+    /// 1 byte
+    pub bits: BitSize,
+
+    /// All records have a flag attribute
+    ///
+    /// 1 byte
+    pub flags: bool,
+
     /// Reserve remaining bytes for future use
     ///
-    /// 19 bytes
-    pub reserved: [u8; 19],
+    /// 17 bytes
+    pub reserved: [u8; 17],
 }
 impl BinseqHeader {
     /// Creates a new header with the specified sequence length
@@ -68,19 +144,23 @@ impl BinseqHeader {
     ///
     /// # Arguments
     ///
+    /// * `bits` - The number of bits per nucleotide (currently 2 or 4)
     /// * `slen` - The length of sequences in the file
+    /// * `flags` - The flags for the header
     ///
     /// # Returns
     ///
     /// A new `BinseqHeader` instance
     #[must_use]
-    pub fn new(slen: u32) -> Self {
+    pub fn new(bits: BitSize, slen: u32, flags: bool) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
             slen,
             xlen: 0,
-            reserved: [42; 19],
+            bits,
+            flags,
+            reserved: RESERVED,
         }
     }
 
@@ -91,21 +171,30 @@ impl BinseqHeader {
     ///
     /// # Arguments
     ///
+    /// * `bits` - The number of bits per nucleotide (currently 2 or 4)
     /// * `slen` - The length of primary sequences in the file
     /// * `xlen` - The length of secondary/extended sequences in the file
+    /// * `flags` - The flags for the header
     ///
     /// # Returns
     ///
     /// A new `BinseqHeader` instance with extended sequence information
     #[must_use]
-    pub fn new_extended(slen: u32, xlen: u32) -> Self {
+    pub fn new_extended(bits: BitSize, slen: u32, xlen: u32, flags: bool) -> Self {
         Self {
             magic: MAGIC,
             format: FORMAT,
             slen,
             xlen,
-            reserved: [42; 19],
+            bits,
+            flags,
+            reserved: RESERVED,
         }
+    }
+
+    /// Sets the bitsize of the header
+    pub fn set_bitsize(&mut self, bits: BitSize) {
+        self.bits = bits;
     }
 
     /// Checks if the file is paired
@@ -145,7 +234,13 @@ impl BinseqHeader {
         }
         let slen = LittleEndian::read_u32(&buffer[5..9]);
         let xlen = LittleEndian::read_u32(&buffer[9..13]);
-        let Ok(reserved) = buffer[13..32].try_into() else {
+        let bits = match buffer[13] {
+            0 | 2 | 42 => BitSize::Two,
+            4 => BitSize::Four,
+            x => return Err(HeaderError::InvalidBitSize(x).into()),
+        };
+        let flags = buffer[14] != 0;
+        let Ok(reserved) = buffer[15..32].try_into() else {
             return Err(HeaderError::InvalidReservedBytes.into());
         };
         Ok(Self {
@@ -153,6 +248,8 @@ impl BinseqHeader {
             format,
             slen,
             xlen,
+            bits,
+            flags,
             reserved,
         })
     }
@@ -209,7 +306,9 @@ impl BinseqHeader {
         buffer[4] = self.format;
         LittleEndian::write_u32(&mut buffer[5..9], self.slen);
         LittleEndian::write_u32(&mut buffer[9..13], self.xlen);
-        buffer[13..32].copy_from_slice(&self.reserved);
+        buffer[13] = self.bits.into();
+        buffer[14] = self.flags.into();
+        buffer[15..32].copy_from_slice(&self.reserved);
         writer.write_all(&buffer)?;
         Ok(())
     }

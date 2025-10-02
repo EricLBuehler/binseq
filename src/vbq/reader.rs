@@ -1,9 +1,65 @@
+//! Reader implementation for VBINSEQ files
+//!
+//! This module provides functionality for reading sequence data from VBINSEQ files,
+//! including support for compressed blocks, quality scores, paired-end reads, and sequence headers.
+//!
+//! ## Format Changes (v0.7.0+)
+//!
+//! - **Embedded Index**: Readers now load the index from within VBQ files instead of separate `.vqi` files
+//! - **Headers Support**: Optional sequence headers/identifiers can be read from each record
+//! - **Multi-bit Encoding**: Support for reading 2-bit and 4-bit nucleotide encodings
+//! - **Extended Capacity**: u64 indexing supports files with more than 4 billion records
+//!
+//! ## Index Loading
+//!
+//! The reader automatically loads the embedded index from the end of VBQ files:
+//! 1. Seeks to the end of the file to read the index trailer
+//! 2. Validates the INDEX_END_MAGIC marker
+//! 3. Reads the index size and decompresses the embedded index
+//! 4. Uses the index for efficient random access and parallel processing
+//!
+//! ## Memory-Mapped Reading
+//!
+//! The `MmapReader` provides efficient access to large files through memory mapping:
+//! - Zero-copy access to file data
+//! - Efficient random access using the embedded index
+//! - Support for parallel processing across record ranges
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use binseq::vbq::MmapReader;
+//! use binseq::BinseqRecord;
+//!
+//! // Open a VBQ file (index is automatically loaded)
+//! let mut reader = MmapReader::new("example.vbq").unwrap();
+//! let mut block = reader.new_block();
+//!
+//! // Read records with headers and quality scores
+//! let mut seq_buffer = Vec::new();
+//! let mut header_buffer = Vec::new();
+//! while reader.read_block_into(&mut block).unwrap() {
+//!     for record in block.iter() {
+//!         record.decode_s(&mut seq_buffer).unwrap();
+//!         record.sheader(&mut header_buffer);
+//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
+//!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
+//!         if !record.squal().is_empty() {
+//!             println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
+//!         }
+//!         seq_buffer.clear();
+//!         header_buffer.clear();
+//!     }
+//! }
+//! ```
+
 use std::fs::File;
 use std::io::Read;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
 use zstd::Decoder;
@@ -12,10 +68,10 @@ use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
     BlockHeader, BlockIndex, BlockRange, VBinseqHeader,
 };
-use crate::ParallelReader;
+use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC, INDEX_HEADER_SIZE};
 use crate::{
     error::{ReadError, Result},
-    BinseqRecord, ParallelProcessor,
+    BinseqRecord, ParallelProcessor, ParallelReader,
 };
 
 /// Calculates the number of 64-bit words needed to store a nucleotide sequence of the given length
@@ -30,8 +86,11 @@ use crate::{
 /// # Returns
 ///
 /// The number of 64-bit words required to encode the sequence
-fn encoded_sequence_len(len: u64) -> usize {
-    len.div_ceil(32) as usize
+fn encoded_sequence_len(len: u64, bitsize: BitSize) -> usize {
+    match bitsize {
+        BitSize::Two => len.div_ceil(32) as usize,
+        BitSize::Four => len.div_ceil(16) as usize,
+    }
 }
 
 /// A container for a block of VBINSEQ records
@@ -39,6 +98,13 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// The `RecordBlock` struct represents a single block of records read from a VBINSEQ file.
 /// It stores the raw data for multiple records in vectors, allowing efficient iteration
 /// over the records without copying memory for each record.
+///
+/// ## Format Support (v0.7.0+)
+///
+/// - Supports reading records with optional sequence headers
+/// - Handles both 2-bit and 4-bit nucleotide encodings
+/// - Supports quality scores and paired sequences
+/// - Compatible with both compressed and uncompressed blocks
 ///
 /// The `RecordBlock` is reused when reading blocks sequentially from a file, with its
 /// contents being cleared and replaced with each new block that is read.
@@ -52,17 +118,24 @@ fn encoded_sequence_len(len: u64) -> usize {
 /// let mut block = reader.new_block(); // Create a block with appropriate size
 /// ```
 pub struct RecordBlock {
+    /// Bitsize of the records in the block
+    bitsize: BitSize,
+
     /// Index of the first record in the block
     /// This allows records to maintain their global position in the file
     index: usize,
 
     /// Buffer containing all record flags in the block
     /// Each record has one flag value stored at the corresponding position
-    flags: Vec<u64>,
+    flags: Vec<Option<u64>>,
 
     /// Buffer containing all sequence lengths in the block
     /// For each record, two consecutive entries are stored: primary sequence length and extended sequence length
     lens: Vec<u64>,
+
+    /// Buffer containing all header lengths in the block
+    /// For each record, two consecutive entries are stored: primary header length and extended header length
+    header_lengths: Vec<u64>,
 
     /// Buffer containing all packed nucleotide sequences in the block
     /// Nucleotides are encoded as 2-bit values (4 nucleotides per byte)
@@ -71,6 +144,9 @@ pub struct RecordBlock {
     /// Buffer containing all quality scores in the block
     /// Quality scores are stored as raw bytes, one byte per nucleotide
     qualities: Vec<u8>,
+
+    /// Buffer containing all headers in the block
+    headers: Vec<u8>,
 
     /// Maximum size of the block in bytes
     /// This is derived from the file header's block size field
@@ -89,19 +165,23 @@ impl RecordBlock {
     ///
     /// # Parameters
     ///
+    /// * `bitsize` - Bitsize of the records in the block
     /// * `block_size` - Maximum size of the block in bytes
     ///
     /// # Returns
     ///
     /// A new empty `RecordBlock` instance
     #[must_use]
-    pub fn new(block_size: usize) -> Self {
+    pub fn new(bitsize: BitSize, block_size: usize) -> Self {
         Self {
+            bitsize,
             index: 0,
             flags: Vec::new(),
             lens: Vec::new(),
+            header_lengths: Vec::new(),
             sequences: Vec::new(),
             qualities: Vec::new(),
+            headers: Vec::new(),
             block_size,
             rbuf: Vec::new(),
         }
@@ -143,7 +223,7 @@ impl RecordBlock {
     /// ```
     #[must_use]
     #[allow(clippy::iter_without_into_iter)]
-    pub fn iter(&self) -> RecordBlockIter {
+    pub fn iter(&self) -> RecordBlockIter<'_> {
         RecordBlockIter::new(self)
     }
 
@@ -168,8 +248,10 @@ impl RecordBlock {
         self.index = 0;
         self.flags.clear();
         self.lens.clear();
+        self.header_lengths.clear();
         self.sequences.clear();
         self.qualities.clear();
+        self.headers.clear();
     }
 
     /// Ingest the bytes from a block into the record block
@@ -184,22 +266,28 @@ impl RecordBlock {
     ///
     /// * `bytes` - A slice of bytes containing the block data
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
+    /// * `has_header` - A boolean indicating whether the block contains headers
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an error
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool) {
+    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > bytes.len() {
-                break;
-            }
-
             // Read the flag and advance the position
-            let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            pos += 8;
+            let flag = if has_flags {
+                if pos + 24 > bytes.len() {
+                    break;
+                }
+                let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                pos += 8;
+                Some(flag)
+            } else {
+                if pos + 16 > bytes.len() {
+                    break;
+                }
+                None
+            };
 
             // Read the primary length and advance the position
             let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
@@ -224,7 +312,7 @@ impl RecordBlock {
 
             // Add the primary sequence to the block
             let mut seq = [0u8; 8];
-            for _ in 0..encoded_sequence_len(slen) {
+            for _ in 0..encoded_sequence_len(slen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -237,8 +325,19 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
+            // Add the primary header to the block
+            if has_header {
+                let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(s_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
+
+                let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
+                self.headers.extend_from_slice(s_header_buffer);
+                pos += s_header_length as usize;
+            }
+
             // Add the extended sequence to the block
-            for _ in 0..encoded_sequence_len(xlen) {
+            for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
                 seq.copy_from_slice(&bytes[pos..pos + 8]);
                 self.sequences.push(LittleEndian::read_u64(&seq));
                 pos += 8;
@@ -250,29 +349,65 @@ impl RecordBlock {
                 self.qualities.extend_from_slice(qual_buffer);
                 pos += xlen as usize;
             }
+
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.header_lengths.push(x_header_length);
+                pos += 8; // Fixed: advance by 8 bytes for u64
+
+                let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
+                self.headers.extend_from_slice(x_header_buffer);
+                pos += x_header_length as usize;
+            }
         }
     }
 
-    fn ingest_compressed_bytes(&mut self, bytes: &[u8], has_quality: bool) -> Result<()> {
+    fn ingest_compressed_bytes(
+        &mut self,
+        bytes: &[u8],
+        has_quality: bool,
+        has_header: bool,
+        has_flags: bool,
+    ) -> Result<()> {
         let mut decoder = Decoder::with_buffer(bytes)?;
 
         let mut pos = 0;
         loop {
-            // Check that we have enough bytes to at least read the flag
-            // and lengths. If not, break out of the loop.
-            if pos + 24 > self.block_size {
-                break;
-            }
+            let (flag, slen, xlen) = if has_flags {
+                // Check that we have enough bytes to at least read the flag
+                // and lengths. If not, break out of the loop.
+                if pos + 24 > self.block_size {
+                    break;
+                }
 
-            // Pull the preambles out of the compressed block and advance the position
-            let mut preamble = [0u8; 24];
-            decoder.read_exact(&mut preamble)?;
-            pos += 24;
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 24];
+                decoder.read_exact(&mut preamble)?;
+                pos += 24;
 
-            // Read the flag + lengths
-            let flag = LittleEndian::read_u64(&preamble[0..8]);
-            let slen = LittleEndian::read_u64(&preamble[8..16]);
-            let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                // Read the flag + lengths
+                let flag = LittleEndian::read_u64(&preamble[0..8]);
+                let slen = LittleEndian::read_u64(&preamble[8..16]);
+                let xlen = LittleEndian::read_u64(&preamble[16..24]);
+                (Some(flag), slen, xlen)
+            } else {
+                // Check that we have enough bytes to at least read the
+                // lengths. If not, break out of the loop.
+                if pos + 16 > self.block_size {
+                    break;
+                }
+
+                // Pull the preambles out of the compressed block and advance the position
+                let mut preamble = [0u8; 16];
+                decoder.read_exact(&mut preamble)?;
+                pos += 16;
+
+                // Read the flag + lengths
+                let slen = LittleEndian::read_u64(&preamble[0..8]);
+                let xlen = LittleEndian::read_u64(&preamble[8..16]);
+                (None, slen, xlen)
+            };
 
             // No more records in the block
             if slen == 0 {
@@ -287,8 +422,8 @@ impl RecordBlock {
             self.lens.push(slen);
             self.lens.push(xlen);
 
-            // Read the sequence and advance the position
-            let schunk = encoded_sequence_len(slen);
+            // Read the primary sequence and advance the position
+            let schunk = encoded_sequence_len(slen, self.bitsize);
             let schunk_bytes = schunk * 8;
             self.rbuf.resize(schunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..schunk_bytes])?;
@@ -299,7 +434,7 @@ impl RecordBlock {
             self.rbuf.clear();
             pos += schunk_bytes;
 
-            // Add the quality score to the block
+            // Add the primary quality score to the block
             if has_quality {
                 self.rbuf.resize(slen as usize, 0);
                 decoder.read_exact(&mut self.rbuf[0..slen as usize])?;
@@ -308,8 +443,24 @@ impl RecordBlock {
                 pos += slen as usize;
             }
 
-            // Read the sequence and advance the position
-            let xchunk = encoded_sequence_len(xlen);
+            // Add the primary header to the block
+            if has_header {
+                self.rbuf.resize(8, 0);
+                decoder.read_exact(&mut self.rbuf[0..8])?;
+                let s_header_length = LittleEndian::read_u64(&self.rbuf);
+                self.header_lengths.push(s_header_length);
+                self.rbuf.clear();
+                pos += 8;
+
+                self.rbuf.resize(s_header_length as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..s_header_length as usize])?;
+                self.headers.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += s_header_length as usize;
+            }
+
+            // Read the extended sequence and advance the position
+            let xchunk = encoded_sequence_len(xlen, self.bitsize);
             let xchunk_bytes = xchunk * 8;
             self.rbuf.resize(xchunk_bytes, 0);
             decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
@@ -320,13 +471,29 @@ impl RecordBlock {
             self.rbuf.clear();
             pos += xchunk_bytes;
 
-            // Add the quality score to the block
+            // Add the extended quality score to the block
             if has_quality {
                 self.rbuf.resize(xlen as usize, 0);
                 decoder.read_exact(&mut self.rbuf[0..xlen as usize])?;
                 self.qualities.extend_from_slice(&self.rbuf);
                 self.rbuf.clear();
                 pos += xlen as usize;
+            }
+
+            // Add the extended header to the block
+            if has_header && xlen > 0 {
+                self.rbuf.resize(8, 0);
+                decoder.read_exact(&mut self.rbuf[0..8])?;
+                let x_header_length = LittleEndian::read_u64(&self.rbuf);
+                self.header_lengths.push(x_header_length);
+                self.rbuf.clear();
+                pos += 8;
+
+                self.rbuf.resize(x_header_length as usize, 0);
+                decoder.read_exact(&mut self.rbuf[0..x_header_length as usize])?;
+                self.headers.extend_from_slice(&self.rbuf);
+                self.rbuf.clear();
+                pos += x_header_length as usize;
             }
         }
         Ok(())
@@ -339,6 +506,10 @@ pub struct RecordBlockIter<'a> {
     rpos: usize,
     /// Encoded sequence position in the block
     epos: usize,
+    /// Header position in the block
+    hpos: usize,
+    /// Quality position in the block
+    qpos: usize,
 }
 impl<'a> RecordBlockIter<'a> {
     #[must_use]
@@ -347,6 +518,8 @@ impl<'a> RecordBlockIter<'a> {
             block,
             rpos: 0,
             epos: 0,
+            hpos: 0,
+            qpos: 0,
         }
     }
 }
@@ -357,34 +530,80 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         if self.rpos == self.block.n_records() {
             return None;
         }
+
         let index = (self.block.index + self.rpos) as u64;
         let flag = self.block.flags[self.rpos];
         let slen = self.block.lens[2 * self.rpos];
         let xlen = self.block.lens[(2 * self.rpos) + 1];
-        let schunk = encoded_sequence_len(slen);
-        let xchunk = encoded_sequence_len(xlen);
+        let schunk = encoded_sequence_len(slen, self.block.bitsize);
+        let xchunk = encoded_sequence_len(xlen, self.block.bitsize);
 
+        // Handle sequences
         let s_seq = &self.block.sequences[self.epos..self.epos + schunk];
-        let s_qual = if self.block.qualities.is_empty() {
-            &[]
-        } else {
-            &self.block.qualities[self.epos..self.epos + slen as usize]
-        };
         self.epos += schunk;
 
         let x_seq = &self.block.sequences[self.epos..self.epos + xchunk];
+        self.epos += xchunk;
+
+        // Handle quality scores (separate position tracking)
+        let s_qual = if self.block.qualities.is_empty() {
+            &[]
+        } else {
+            let qual = &self.block.qualities[self.qpos..self.qpos + slen as usize];
+            self.qpos += slen as usize;
+            qual
+        };
+
         let x_qual = if self.block.qualities.is_empty() {
             &[]
         } else {
-            &self.block.qualities[self.epos..self.epos + xlen as usize]
+            let qual = &self.block.qualities[self.qpos..self.qpos + xlen as usize];
+            self.qpos += xlen as usize;
+            qual
         };
-        self.epos += xchunk;
+
+        // Handle headers (separate position tracking)
+        let header_idx = if xlen > 0 { 2 * self.rpos } else { self.rpos };
+        let mut shlen = 0;
+        let s_header = if self.block.headers.is_empty() {
+            &[]
+        } else {
+            // Get header length
+            shlen = self.block.header_lengths[header_idx];
+
+            // Extract header data
+            let header = &self.block.headers[self.hpos..self.hpos + shlen as usize];
+            self.hpos += shlen as usize;
+            header
+        };
+
+        let mut xhlen = 0;
+        let x_header = if self.block.headers.is_empty() || xlen == 0 {
+            &[]
+        } else {
+            xhlen = self.block.header_lengths[header_idx + 1];
+            let header = &self.block.headers[self.hpos..self.hpos + xhlen as usize];
+            self.hpos += xhlen as usize;
+            header
+        };
 
         // update record position
         self.rpos += 1;
 
         Some(RefRecord::new(
-            index, flag, slen, xlen, s_seq, x_seq, s_qual, x_qual,
+            self.block.bitsize,
+            index,
+            flag,
+            slen,
+            xlen,
+            s_seq,
+            x_seq,
+            s_qual,
+            x_qual,
+            shlen,
+            s_header,
+            xhlen,
+            x_header,
         ))
     }
 }
@@ -413,7 +632,7 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 ///
 /// for record in block.iter() {
 ///     // Get record metadata
-///     println!("Record {}, flag: {}", record.index(), record.flag());
+///     println!("Record {}, flag: {:?}", record.index(), record.flag());
 ///
 ///     // Decode the primary sequence
 ///     record.decode_s(&mut sequence).unwrap();
@@ -434,11 +653,14 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 /// }
 /// ```
 pub struct RefRecord<'a> {
+    /// Bitsize of the record
+    bitsize: BitSize,
+
     /// Global index of this record within the file
     index: u64,
 
     /// Flag value for this record (can be used for custom metadata)
-    flag: u64,
+    flag: Option<u64>,
 
     /// Length of the primary sequence in nucleotides
     slen: u64,
@@ -457,21 +679,39 @@ pub struct RefRecord<'a> {
 
     /// Quality scores for the extended/paired sequence (empty if not paired or no quality)
     xqual: &'a [u8],
+
+    /// Length of the header for the primary sequence in bytes
+    shlen: u64,
+
+    /// Header for the record
+    sheader: &'a [u8],
+
+    /// Length of the header for the extended/paired sequence in bytes
+    xhlen: u64,
+
+    /// Header for the extended/paired sequence (empty if not paired)
+    xheader: &'a [u8],
 }
 impl<'a> RefRecord<'a> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
+        bitsize: BitSize,
         index: u64,
-        flag: u64,
+        flag: Option<u64>,
         slen: u64,
         xlen: u64,
         sbuf: &'a [u64],
         xbuf: &'a [u64],
         squal: &'a [u8],
         xqual: &'a [u8],
+        shlen: u64,
+        sheader: &'a [u8],
+        xhlen: u64,
+        xheader: &'a [u8],
     ) -> Self {
         Self {
+            bitsize,
             index,
             flag,
             slen,
@@ -480,15 +720,47 @@ impl<'a> RefRecord<'a> {
             xbuf,
             squal,
             xqual,
+            shlen,
+            sheader,
+            xhlen,
+            xheader,
         }
     }
 }
 
+impl RefRecord<'_> {
+    pub fn shlen(&self) -> u64 {
+        self.shlen
+    }
+    pub fn xhlen(&self) -> u64 {
+        self.xhlen
+    }
+}
+
 impl BinseqRecord for RefRecord<'_> {
+    fn bitsize(&self) -> BitSize {
+        self.bitsize
+    }
     fn index(&self) -> u64 {
         self.index
     }
-    fn flag(&self) -> u64 {
+    fn sheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.sheader);
+        }
+    }
+    fn xheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        if self.sheader.is_empty() {
+            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+        } else {
+            buffer.extend_from_slice(self.xheader);
+        }
+    }
+    fn flag(&self) -> Option<u64> {
         self.flag
     }
     fn slen(&self) -> u64 {
@@ -509,16 +781,19 @@ impl BinseqRecord for RefRecord<'_> {
     fn xqual(&self) -> &[u8] {
         self.xqual
     }
-    fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf, self.xlen as usize, dbuf)?;
-        Ok(())
-    }
 }
 
 /// Memory-mapped reader for VBINSEQ files
 ///
 /// [`MmapReader`] provides efficient, memory-mapped access to VBINSEQ files. It allows
 /// sequential reading of record blocks and supports parallel processing of records.
+///
+/// ## Format Support (v0.7.0+)
+///
+/// - **Embedded Index**: Automatically loads index from within VBQ files
+/// - **Headers Support**: Reads optional sequence headers/identifiers from records
+/// - **Multi-bit Encoding**: Supports both 2-bit and 4-bit nucleotide encodings
+/// - **Extended Capacity**: u64 indexing supports files with more than 4 billion records
 ///
 /// Memory mapping allows the operating system to lazily load file contents as needed,
 /// which can be more efficient than standard file I/O, especially for large files.
@@ -532,23 +807,43 @@ impl BinseqRecord for RefRecord<'_> {
 /// Each [`RecordBlock`] contains a [`BlockHeader`] and is used to access [`RefRecord`]s
 /// which implement the [`BinseqRecord`] trait.
 ///
+/// ## Index Loading
+///
+/// The reader automatically loads the embedded index by:
+/// 1. Reading the index trailer from the end of the file
+/// 2. Validating the INDEX_END_MAGIC marker
+/// 3. Decompressing the embedded index data
+/// 4. Using the index for efficient random access and parallel processing
+///
 /// # Examples
 ///
 /// ```
 /// use binseq::vbq::MmapReader;
-/// use binseq::Result;
+/// use binseq::{BinseqRecord, Result};
 ///
 /// fn main() -> Result<()> {
 ///     let path = "./data/subset.vbq";
-///     let mut reader = MmapReader::new(path)?;
+///     let mut reader = MmapReader::new(path)?; // Index loaded automatically
 ///
-///     // Create a block to hold records
+///     // Create buffers for sequence data and headers
+///     let mut seq_buffer = Vec::new();
+///     let mut header_buffer = Vec::new();
 ///     let mut block = reader.new_block();
 ///
 ///     // Read blocks sequentially
 ///     while reader.read_block_into(&mut block)? {
 ///         println!("Read a block with {} records", block.n_records());
-///         // Process records...
+///         for record in block.iter() {
+///             // Decode sequence and header
+///             record.decode_s(&mut seq_buffer)?;
+///             record.sheader(&mut header_buffer);
+///
+///             println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap_or(""));
+///             println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap_or(""));
+///
+///             seq_buffer.clear();
+///             header_buffer.clear();
+///         }
 ///     }
 ///     Ok(())
 /// }
@@ -572,9 +867,15 @@ pub struct MmapReader {
 impl MmapReader {
     /// Creates a new `MmapReader` for a VBINSEQ file
     ///
-    /// This method opens the specified file, memory-maps its contents, and reads the
-    /// VBINSEQ header information. The reader is positioned at the beginning of the first
-    /// record block after the header.
+    /// This method opens the specified file, memory-maps its contents, reads the
+    /// VBINSEQ header information, and loads the embedded index. The reader is positioned
+    /// at the beginning of the first record block after the header.
+    ///
+    /// ## Index Loading (v0.7.0+)
+    ///
+    /// The embedded index is automatically loaded from the end of the file. For legacy
+    /// files with separate `.vqi` index files, the index is automatically migrated to
+    /// the embedded format.
     ///
     /// # Parameters
     ///
@@ -642,7 +943,7 @@ impl MmapReader {
     /// ```
     #[must_use]
     pub fn new_block(&self) -> RecordBlock {
-        RecordBlock::new(self.header.block as usize)
+        RecordBlock::new(self.header.bits, self.header.block as usize)
     }
 
     /// Returns the path where the index file would be located
@@ -751,8 +1052,23 @@ impl MmapReader {
         }
         let mut header_bytes = [0u8; SIZE_BLOCK_HEADER];
         header_bytes.copy_from_slice(&self.mmap[self.pos..self.pos + SIZE_BLOCK_HEADER]);
-        let header = BlockHeader::from_bytes(&header_bytes)?;
-        self.pos += SIZE_BLOCK_HEADER; // advance past the block header
+        let header = match BlockHeader::from_bytes(&header_bytes) {
+            Ok(header) => {
+                self.pos += SIZE_BLOCK_HEADER;
+                header
+            }
+            // Bytes left - but not a BlockHeader - could be the index
+            Err(e) => {
+                let mut index_header_bytes = [0u8; INDEX_HEADER_SIZE];
+                index_header_bytes
+                    .copy_from_slice(&self.mmap[self.pos..self.pos + INDEX_HEADER_SIZE]);
+                if IndexHeader::from_bytes(&index_header_bytes).is_ok() {
+                    // Expected end of file
+                    return Ok(false);
+                }
+                return Err(e.into());
+            }
+        };
 
         // Read the block contents
         let rbound = if self.header.compressed {
@@ -765,9 +1081,19 @@ impl MmapReader {
         }
         let block_buffer = &self.mmap[self.pos..self.pos + rbound];
         if self.header.compressed {
-            block.ingest_compressed_bytes(block_buffer, self.header.qual)?;
+            block.ingest_compressed_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            )?;
         } else {
-            block.ingest_bytes(block_buffer, self.header.qual);
+            block.ingest_bytes(
+                block_buffer,
+                self.header.qual,
+                self.header.headers,
+                self.header.flags,
+            );
         }
 
         // Update the block index
@@ -817,24 +1143,26 @@ impl MmapReader {
     /// extension appended. This allows for reusing the index across multiple runs,
     /// which can significantly improve startup performance for large files.
     pub fn load_index(&self) -> Result<BlockIndex> {
-        if self.index_path().exists() {
-            match BlockIndex::from_path(self.index_path()) {
-                Ok(index) => Ok(index),
-                Err(e) => {
-                    if e.is_index_mismatch() {
-                        let index = BlockIndex::from_vbq(&self.path)?;
-                        index.save_to_path(self.index_path())?;
-                        Ok(index)
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
-        } else {
-            let index = BlockIndex::from_vbq(&self.path)?;
-            index.save_to_path(self.index_path())?;
-            Ok(index)
+        let start_pos_magic = self.mmap.len() - 8;
+        let start_pos_index_size = start_pos_magic - 8;
+
+        // Validate the magic number
+        let magic = LittleEndian::read_u64(&self.mmap[start_pos_magic..]);
+        if magic != INDEX_END_MAGIC {
+            return Err(ReadError::MissingIndexEndMagic.into());
         }
+
+        // Get the index size
+        let index_size = LittleEndian::read_u64(&self.mmap[start_pos_index_size..start_pos_magic]);
+
+        // Determine the start position of the index bytes
+        let start_pos_index = start_pos_index_size - index_size as usize;
+
+        // Slice into the index bytes
+        let index_bytes = &self.mmap[start_pos_index..start_pos_index_size];
+
+        // Build the index from the bytes
+        BlockIndex::from_bytes(index_bytes)
     }
 
     pub fn num_records(&self) -> Result<usize> {
@@ -988,7 +1316,7 @@ impl ParallelReader for MmapReader {
         let index = self.load_index()?;
 
         // Validate range
-        let total_records = self.num_records()?;
+        let total_records = index.num_records();
         if range.start >= total_records || range.end > total_records || range.start >= range.end {
             return Ok(()); // Nothing to process or invalid range
         }
@@ -999,7 +1327,7 @@ impl ParallelReader for MmapReader {
             .iter()
             .filter(|r| {
                 let iv_start = r.cumulative_records as usize;
-                let iv_end = (r.cumulative_records + r.block_records) as usize;
+                let iv_end = (r.cumulative_records + r.block_records as u64) as usize;
                 iv_start < range.end && iv_end > range.start
             })
             .copied()
@@ -1039,7 +1367,7 @@ impl ParallelReader for MmapReader {
 
             let handle = std::thread::spawn(move || -> Result<()> {
                 // Create block to reuse for processing (within thread)
-                let mut record_block = RecordBlock::new(header.block as usize);
+                let mut record_block = RecordBlock::new(header.bits, header.block as usize);
 
                 // Process each assigned block
                 for block_range in thread_blocks {
@@ -1052,9 +1380,19 @@ impl ParallelReader for MmapReader {
 
                     // Ingest data according to the compression setting
                     if header.compressed {
-                        record_block.ingest_compressed_bytes(block_data, header.qual)?;
+                        record_block.ingest_compressed_bytes(
+                            block_data,
+                            header.qual,
+                            header.headers,
+                            header.flags,
+                        )?;
                     } else {
-                        record_block.ingest_bytes(block_data, header.qual);
+                        record_block.ingest_bytes(
+                            block_data,
+                            header.qual,
+                            header.headers,
+                            header.flags,
+                        );
                     }
 
                     // Update the record block index

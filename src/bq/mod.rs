@@ -50,7 +50,7 @@
 //! let output_handle = File::create(path).unwrap();
 //!
 //! // Initialize our BINSEQ header (64 bp, only primary)
-//! let header = bq::BinseqHeader::new(64);
+//! let header = bq::BinseqHeaderBuilder::new().slen(64).build().unwrap();
 //!
 //! // Initialize our BINSEQ writer
 //! let mut writer = bq::BinseqWriterBuilder::default()
@@ -63,7 +63,7 @@
 //! let flag = 0;
 //!
 //! // Write the sequence to the file
-//! writer.write_nucleotides(flag, &seq).unwrap();
+//! writer.write_record(Some(flag), &seq).unwrap();
 //!
 //! // Close the file
 //! writer.flush().unwrap();
@@ -85,7 +85,7 @@
 //! let output_handle = File::create(path).unwrap();
 //!
 //! // Initialize our BINSEQ header (64 bp and 128bp)
-//! let header = bq::BinseqHeader::new_extended(64, 128);
+//! let header = bq::BinseqHeaderBuilder::new().slen(64).xlen(128).build().unwrap();
 //!
 //! // Initialize our BINSEQ writer
 //! let mut writer = bq::BinseqWriterBuilder::default()
@@ -99,7 +99,7 @@
 //! let flag = 0;
 //!
 //! // Write the sequence to the file
-//! writer.write_paired(flag, &primary, &secondary).unwrap();
+//! writer.write_paired_record(Some(flag), &primary, &secondary).unwrap();
 //!
 //! // Close the file
 //! writer.flush().unwrap();
@@ -112,12 +112,12 @@
 //!
 //! ```
 //! use binseq::{Policy, Result, BinseqRecord};
-//! use binseq::bq::{BinseqHeader, StreamReader, StreamWriterBuilder};
+//! use binseq::bq::{BinseqHeaderBuilder, StreamReader, StreamWriterBuilder};
 //! use std::io::{BufReader, Cursor};
 //!
 //! fn main() -> Result<()> {
 //!     // Create a header for sequences of length 100
-//!     let header = BinseqHeader::new(100);
+//!     let header = BinseqHeaderBuilder::new().slen(100).build()?;
 //!
 //!     // Create a stream writer
 //!     let mut writer = StreamWriterBuilder::default()
@@ -127,7 +127,7 @@
 //!
 //!     // Write sequences
 //!     let sequence = b"ACGT".repeat(25); // 100 nucleotides
-//!     writer.write_nucleotides(0, &sequence)?;
+//!     writer.write_record(Some(0), &sequence)?;
 //!
 //!     // Get the inner buffer
 //!     let buffer = writer.into_inner()?;
@@ -238,10 +238,8 @@
 
 mod header;
 mod reader;
-mod utils;
 mod writer;
 
-pub use header::{BinseqHeader, SIZE_HEADER};
+pub use header::{BinseqHeader, BinseqHeaderBuilder, SIZE_HEADER};
 pub use reader::{MmapReader, RefRecord, StreamReader};
-pub use utils::expected_file_size;
 pub use writer::{BinseqWriter, BinseqWriterBuilder, Encoder, StreamWriter, StreamWriterBuilder};

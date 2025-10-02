@@ -1,4 +1,5 @@
 use auto_impl::auto_impl;
+use bitnuc::BitSize;
 
 use super::Result;
 
@@ -12,11 +13,20 @@ use super::Result;
 /// Used to interact with [`ParallelProcessor`](crate::ParallelProcessor) for easy parallel processing.
 #[auto_impl(&, &mut)]
 pub trait BinseqRecord {
+    /// Returns the bitsize of the record (number of bits per nucleotide)
+    fn bitsize(&self) -> BitSize;
+
     /// Returns the global index of the record.
     fn index(&self) -> u64;
 
     /// Returns the flag value of this record
-    fn flag(&self) -> u64;
+    fn flag(&self) -> Option<u64>;
+
+    /// Fills a buffer with the header of this record.
+    fn sheader(&self, buffer: &mut Vec<u8>);
+
+    /// Fills a buffer with the header of the extended/paired sequence (empty if not paired)
+    fn xheader(&self, buffer: &mut Vec<u8>);
 
     /// Returns the length of the primary sequence of this record
     fn slen(&self) -> u64;
@@ -48,13 +58,15 @@ pub trait BinseqRecord {
 
     /// Decodes the primary sequence of this record into the provided buffer.
     fn decode_s(&self, buf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.sbuf(), self.slen() as usize, buf)?;
+        self.bitsize()
+            .decode(self.sbuf(), self.slen() as usize, buf)?;
         Ok(())
     }
 
     /// Decodes the extended sequence of this record into the provided buffer.
     fn decode_x(&self, buf: &mut Vec<u8>) -> Result<()> {
-        bitnuc::decode(self.xbuf(), self.xlen() as usize, buf)?;
+        self.bitsize()
+            .decode(self.xbuf(), self.xlen() as usize, buf)?;
         Ok(())
     }
 

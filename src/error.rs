@@ -18,6 +18,10 @@ pub enum Error {
     #[error("Error reading file: {0}")]
     ReadError(#[from] ReadError),
 
+    /// Errors that occur during build operations
+    #[error("Error building file: {0}")]
+    BuilderError(#[from] BuilderError),
+
     /// Errors related to file indexing
     #[error("Error processing Index: {0}")]
     IndexError(#[from] IndexError),
@@ -35,7 +39,7 @@ pub enum Error {
 
     /// Errors from the bitnuc dependency for nucleotide encoding/decoding
     #[error("Bitnuc error: {0}")]
-    BitnucError(#[from] bitnuc::NucleotideError),
+    BitnucError(#[from] bitnuc::Error),
 
     /// Generic errors for other unexpected situations
     #[error("Generic error: {0}")]
@@ -80,6 +84,10 @@ pub enum HeaderError {
     /// The reserved bytes in the header contain unexpected values
     #[error("Invalid reserved bytes")]
     InvalidReservedBytes,
+
+    /// The bits in the header contain unexpected values
+    #[error("Invalid bit size found in header: {0} - expecting [2,4]")]
+    InvalidBitSize(u8),
 
     /// The size of the data does not match what was specified in the header
     ///
@@ -140,6 +148,16 @@ pub enum ReadError {
     /// When the file metadata doesn't match the expected VBINSEQ format
     #[error("Unexpected file metadata")]
     InvalidFileType,
+
+    /// Missing the index end magic number
+    #[error("Missing index end magic number")]
+    MissingIndexEndMagic,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BuilderError {
+    #[error("Missing sequence length")]
+    MissingSlen,
 }
 
 /// Errors that can occur while writing binary sequence data
@@ -179,6 +197,10 @@ pub enum WriteError {
     /// When trying to write paired data but the header doesn't specify paired records
     #[error("Paired flag not set in header but trying to write with record pair.")]
     PairedFlagNotSet,
+
+    /// When trying to write data without headers but the header specifies they should be present
+    #[error("Header flag is set in header but trying to write without headers.")]
+    HeaderFlagSet,
 
     /// When a record is too large to fit in a block of the configured size
     ///

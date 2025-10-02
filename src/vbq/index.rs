@@ -1,6 +1,41 @@
+//! # VBQ Index Format
+//!
+//! This module implements the embedded index format for VBQ files.
+//!
+//! ## Format Changes (v0.7.0+)
+//!
+//! **BREAKING CHANGE**: The VBQ index is now embedded at the end of VBQ files instead of
+//! being stored in separate `.vqi` files. This improves portability and eliminates the
+//! need to manage auxiliary files.
+//!
+//! ## Embedded Index Structure
+//!
+//! The index is located at the end of the VBQ file with this layout:
+//!
+//! ```text
+//! [VBQ Data Blocks][Compressed Index][Index Size (u64)][INDEX_END_MAGIC (u64)]
+//! ```
+//!
+//! Where:
+//! - **Compressed Index**: ZSTD-compressed index data (IndexHeader + BlockRanges)
+//! - **Index Size**: 8 bytes indicating size of compressed index data
+//! - **INDEX_END_MAGIC**: 8 bytes (`0x444E455845444E49` = "INDEXEND")
+//!
+//! ## Index Contents
+//!
+//! The compressed index contains:
+//! 1. **IndexHeader** (32 bytes): Metadata about the indexed file
+//! 2. **BlockRange entries** (32 bytes each): One per data block
+//!
+//! ## Key Changes from v0.6.x
+//!
+//! - Index moved from separate `.vqi` files into VBQ files
+//! - Cumulative record counts changed from `u32` to `u64`
+//! - Support for files with more than 4 billion records
+
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter, Cursor, Read, Write},
     path::Path,
 };
 
@@ -20,8 +55,11 @@ pub const INDEX_HEADER_SIZE: usize = 32;
 /// Magic number to designate index (VBQINDEX)
 #[allow(clippy::unreadable_literal)]
 pub const INDEX_MAGIC: u64 = 0x5845444e49514256;
+/// Magic number to designate end of index (INDEXEND)
+#[allow(clippy::unreadable_literal)]
+pub const INDEX_END_MAGIC: u64 = 0x444E455845444E49;
 /// Index Block Reservation
-pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
+pub const INDEX_RESERVATION: [u8; 4] = [42; 4];
 
 /// Descriptor of the dimensions of a block in a VBINSEQ file
 ///
@@ -30,7 +68,13 @@ pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
 /// efficient random access to blocks without scanning the entire file.
 ///
 /// Block ranges are stored in a `BlockIndex` to form a complete index of a VBINSEQ file.
-/// Each range is serialized to a fixed-size 32-byte structure when stored in an index file.
+/// Each range is serialized to a fixed-size 32-byte structure when stored in the embedded index.
+///
+/// ## Format Changes (v0.7.0+)
+///
+/// - `cumulative_records` field changed from `u32` to `u64`
+/// - Supports files with more than 4 billion records
+/// - Reserved bytes reduced from 8 to 4 bytes
 ///
 /// # Examples
 ///
@@ -42,7 +86,7 @@ pub const INDEX_RESERVATION: [u8; 8] = [42; 8];
 ///     1024,                  // Starting offset in the file (bytes)
 ///     8192,                  // Length of the block (bytes)
 ///     1000,                  // Number of records in this block
-///     5000                   // Cumulative number of records up to this block
+///     5000                   // Cumulative number of records up to this block (now u64)
 /// );
 ///
 /// // Use the range information
@@ -77,13 +121,14 @@ pub struct BlockRange {
     /// This allows efficient determination of which block contains a specific record
     /// by index without scanning through all previous blocks.
     ///
-    /// (4 bytes in serialized form)
-    pub cumulative_records: u32,
-
-    /// Reserved bytes for future extensions
+    /// **BREAKING CHANGE (v0.7.0+)**: Changed from u32 to u64 to support files
+    /// with more than 4 billion records.
     ///
     /// (8 bytes in serialized form)
-    pub reservation: [u8; 8],
+    pub cumulative_records: u64,
+
+    /// Reserved bytes for future extensions
+    pub reservation: [u8; 4],
 }
 impl BlockRange {
     /// Creates a new `BlockRange` with the specified parameters
@@ -108,7 +153,7 @@ impl BlockRange {
     /// let range = BlockRange::new(1024, 8192, 1000, 5000);
     /// ```
     #[must_use]
-    pub fn new(start_offset: u64, len: u64, block_records: u32, cumulative_records: u32) -> Self {
+    pub fn new(start_offset: u64, len: u64, block_records: u32, cumulative_records: u64) -> Self {
         Self {
             start_offset,
             len,
@@ -141,8 +186,8 @@ impl BlockRange {
         LittleEndian::write_u64(&mut buf[0..8], self.start_offset);
         LittleEndian::write_u64(&mut buf[8..16], self.len);
         LittleEndian::write_u32(&mut buf[16..20], self.block_records);
-        LittleEndian::write_u32(&mut buf[20..24], self.cumulative_records);
-        buf[24..].copy_from_slice(&self.reservation);
+        LittleEndian::write_u64(&mut buf[20..28], self.cumulative_records);
+        buf[28..].copy_from_slice(&self.reservation);
         writer.write_all(&buf)?;
         Ok(())
     }
@@ -166,15 +211,15 @@ impl BlockRange {
     /// - Bytes 0-7: `start_offset` (u64, little endian)
     /// - Bytes 8-15: len (u64, little endian)
     /// - Bytes 16-19: `block_records` (u32, little endian)
-    /// - Bytes 20-23: `cumulative_records` (u32, little endian)
-    /// - Bytes 24-31: reservation (ignored, default value used)
+    /// - Bytes 20-27: `cumulative_records` (u64, little endian)
+    /// - Bytes 28-31: reservation (ignored, default value used)
     #[must_use]
     pub fn from_exact(buffer: &[u8; SIZE_BLOCK_RANGE]) -> Self {
         Self {
             start_offset: LittleEndian::read_u64(&buffer[0..8]),
             len: LittleEndian::read_u64(&buffer[8..16]),
             block_records: LittleEndian::read_u32(&buffer[16..20]),
-            cumulative_records: LittleEndian::read_u32(&buffer[20..24]),
+            cumulative_records: LittleEndian::read_u64(&buffer[20..28]),
             reservation: INDEX_RESERVATION,
         }
     }
@@ -285,6 +330,13 @@ impl IndexHeader {
             reserved,
         })
     }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut buffer = [0; INDEX_HEADER_SIZE];
+        buffer.copy_from_slice(&bytes[..INDEX_HEADER_SIZE]);
+        Self::from_reader(&mut Cursor::new(buffer))
+    }
+
     /// Serializes the index header to a binary format and writes it to the provided writer
     ///
     /// This method serializes the `IndexHeader` to a fixed-size 32-byte structure and
@@ -347,10 +399,10 @@ impl IndexHeader {
 #[derive(Debug, Clone)]
 pub struct BlockIndex {
     /// Header containing metadata about the indexed file
-    header: IndexHeader,
+    pub(crate) header: IndexHeader,
 
     /// Collection of block ranges, one for each block in the file
-    ranges: Vec<BlockRange>,
+    pub(crate) ranges: Vec<BlockRange>,
 }
 impl BlockIndex {
     /// Creates a new empty block index with the specified header
@@ -426,6 +478,15 @@ impl BlockIndex {
         Ok(())
     }
 
+    /// Write the index to an output buffer
+    pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<()> {
+        self.header.write_bytes(writer)?;
+        let mut writer = Encoder::new(writer, 3)?.auto_finish();
+        self.write_range(&mut writer)?;
+        writer.flush()?;
+        Ok(())
+    }
+
     /// Write the collection of `BlockRange` to an output handle
     /// Writes all block ranges to the provided writer
     ///
@@ -444,6 +505,7 @@ impl BlockIndex {
     pub fn write_range<W: Write>(&self, writer: &mut W) -> Result<()> {
         self.ranges
             .iter()
+            .filter(|range| range.block_records > 0)
             .try_for_each(|range| -> Result<()> { range.write_bytes(writer) })
     }
 
@@ -535,7 +597,7 @@ impl BlockIndex {
                 record_total,
             ));
             pos += SIZE_BLOCK_HEADER + block_header.size as usize;
-            record_total += block_header.records;
+            record_total += block_header.records as u64;
         }
 
         Ok(index)
@@ -564,6 +626,27 @@ impl BlockIndex {
         let buffer = {
             let mut buffer = Vec::new();
             let mut decoder = Decoder::new(file_handle)?;
+            decoder.read_to_end(&mut buffer)?;
+            buffer
+        };
+
+        let mut ranges = Self::new(index_header);
+        let mut pos = 0;
+        while pos < buffer.len() {
+            let bound = pos + SIZE_BLOCK_RANGE;
+            let range = BlockRange::from_bytes(&buffer[pos..bound]);
+            ranges.add_range(range);
+            pos += SIZE_BLOCK_RANGE;
+        }
+
+        Ok(ranges)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let index_header = IndexHeader::from_bytes(bytes)?;
+        let buffer = {
+            let mut buffer = Vec::new();
+            let mut decoder = Decoder::new(Cursor::new(&bytes[INDEX_HEADER_SIZE..]))?;
             decoder.read_to_end(&mut buffer)?;
             buffer
         };
@@ -619,11 +702,12 @@ impl BlockIndex {
     }
 
     /// Returns the total number of records in the dataset
+    #[must_use]
     pub fn num_records(&self) -> usize {
         self.ranges
             .iter()
             .next_back()
-            .map(|r| (r.cumulative_records + r.block_records) as usize)
+            .map(|r| (r.cumulative_records + r.block_records as u64) as usize)
             .unwrap_or_default()
     }
 }

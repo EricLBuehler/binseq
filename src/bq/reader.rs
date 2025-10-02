@@ -13,6 +13,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
+use bitnuc::BitSize;
 use bytemuck::cast_slice;
 use memmap2::Mmap;
 
@@ -68,11 +69,26 @@ impl<'a> RefRecord<'a> {
 }
 
 impl BinseqRecord for RefRecord<'_> {
+    fn bitsize(&self) -> BitSize {
+        self.config.bitsize
+    }
     fn index(&self) -> u64 {
         self.id
     }
-    fn flag(&self) -> u64 {
-        self.buffer[0]
+    fn sheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    }
+    fn xheader(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    }
+    fn flag(&self) -> Option<u64> {
+        if self.config.flags {
+            Some(self.buffer[0])
+        } else {
+            None
+        }
     }
     fn slen(&self) -> u64 {
         self.config.slen
@@ -81,10 +97,18 @@ impl BinseqRecord for RefRecord<'_> {
         self.config.xlen
     }
     fn sbuf(&self) -> &[u64] {
-        &self.buffer[1..=(self.config.schunk as usize)]
+        if self.config.flags {
+            &self.buffer[1..=(self.config.schunk as usize)]
+        } else {
+            &self.buffer[..(self.config.schunk as usize)]
+        }
     }
     fn xbuf(&self) -> &[u64] {
-        &self.buffer[1 + self.config.schunk as usize..]
+        if self.config.flags {
+            &self.buffer[1 + self.config.schunk as usize..]
+        } else {
+            &self.buffer[self.config.schunk as usize..]
+        }
     }
 }
 
@@ -106,6 +130,10 @@ pub struct RecordConfig {
     /// The number of u64 chunks needed to store the extended sequence
     /// (each u64 stores 32 values)
     xchunk: u64,
+    /// The bitsize of the record
+    bitsize: BitSize,
+    /// Whether flags are present
+    flags: bool,
 }
 impl RecordConfig {
     /// Creates a new record configuration
@@ -117,16 +145,24 @@ impl RecordConfig {
     ///
     /// * `slen` - The length of primary sequences in the file
     /// * `xlen` - The length of secondary/extended sequences in the file
+    /// * `bitsize` - The bitsize of the record
+    /// * `flags` - Whether flags are present
     ///
     /// # Returns
     ///
     /// A new `RecordConfig` instance with the specified sequence lengths
-    pub fn new(slen: usize, xlen: usize) -> Self {
+    pub fn new(slen: usize, xlen: usize, bitsize: BitSize, flags: bool) -> Self {
+        let (schunk, xchunk) = match bitsize {
+            BitSize::Two => (slen.div_ceil(32), xlen.div_ceil(32)),
+            BitSize::Four => (slen.div_ceil(16), xlen.div_ceil(16)),
+        };
         Self {
             slen: slen as u64,
             xlen: xlen as u64,
-            schunk: (slen as u64).div_ceil(32),
-            xchunk: (xlen as u64).div_ceil(32),
+            schunk: schunk as u64,
+            xchunk: xchunk as u64,
+            bitsize,
+            flags,
         }
     }
 
@@ -143,7 +179,12 @@ impl RecordConfig {
     ///
     /// A new `RecordConfig` instance with the sequence lengths from the header
     pub fn from_header(header: &BinseqHeader) -> Self {
-        Self::new(header.slen as usize, header.xlen as usize)
+        Self::new(
+            header.slen as usize,
+            header.xlen as usize,
+            header.bits,
+            header.flags,
+        )
     }
 
     /// Returns whether this record contains extended sequence data
@@ -192,7 +233,11 @@ impl RecordConfig {
     /// Returns the full record size in u64
     /// schunk + xchunk + 1 (flag)
     pub fn record_size_u64(&self) -> usize {
-        (self.schunk + self.xchunk + 1) as usize
+        if self.flags {
+            (self.schunk + self.xchunk + 1) as usize
+        } else {
+            (self.schunk + self.xchunk) as usize
+        }
     }
 }
 
@@ -326,12 +371,13 @@ impl MmapReader {
     /// # Errors
     ///
     /// Returns an error if the requested index is beyond the number of records in the file
-    pub fn get(&self, idx: usize) -> Result<RefRecord> {
+    pub fn get(&self, idx: usize) -> Result<RefRecord<'_>> {
         if idx > self.num_records() {
             return Err(ReadError::OutOfRange(idx, self.num_records()).into());
         }
-        let lbound = SIZE_HEADER + (idx * self.config.record_size_bytes());
-        let rbound = lbound + self.config.record_size_bytes();
+        let rsize = self.config.record_size_bytes();
+        let lbound = SIZE_HEADER + (idx * rsize);
+        let rbound = lbound + rsize;
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
         Ok(RefRecord::new(idx as u64, buffer, self.config))
@@ -511,7 +557,7 @@ impl<R: Read> StreamReader<R> {
     /// * There is an I/O error when reading from the source
     /// * The header has not been read yet
     /// * The data format is invalid
-    pub fn next_record(&mut self) -> Option<Result<RefRecord>> {
+    pub fn next_record(&mut self) -> Option<Result<RefRecord<'_>>> {
         // Ensure header is read
         if self.header.is_none() {
             if let Some(e) = self.read_header().err() {

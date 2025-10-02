@@ -14,6 +14,8 @@
 //!
 //! * **Quality scores**: Optional storage of quality scores alongside nucleotide data when needed.
 //!
+//! * **Sequence headers**: Optional storage of sequence identifiers/headers with each record.
+//!
 //! * **Block-based organization**: Data is organized into fixed-size independent record blocks
 //!   for efficient parallel processing.
 //!
@@ -22,10 +24,13 @@
 //!
 //! * **Paired-end support**: Native support for paired sequences without needing multiple files.
 //!
+//! * **Multi-bit encoding**: Support for 2-bit and 4-bit nucleotide encodings.
+//!
+//! * **Embedded index**: Self-contained files with embedded index data for efficient random access.
+//!
 //! ## File Structure
 //!
-//! A VBINSEQ file consists of a 32-byte header followed by a series of record blocks.
-//! Each block has a 32-byte header and contains one or more variable-length records.
+//! A VBINSEQ file consists of a 32-byte header followed by record blocks and an embedded index:
 //!
 //! ```text
 //! ┌───────────────────┐
@@ -37,25 +42,39 @@
 //! │   Block Records   │ Variable size
 //! │                   │
 //! ├───────────────────┤
-//! │   Block Header    │ 32 bytes
+//! │       ...         │ More blocks
 //! ├───────────────────┤
-//! │                   │
-//! │   Block Records   │ Variable size
-//! │                   │
+//! │ Compressed Index  │ Variable size
+//! ├───────────────────┤
+//! │   Index Size      │ 8 bytes (u64)
+//! ├───────────────────┤
+//! │ Index End Magic   │ 8 bytes
 //! └───────────────────┘
 //! ```
 //!
 //! ## Record Format
 //!
-//! Each record contains:
+//! Each record contains the following fields in order:
 //!
 //! * Flag field (8 bytes)
 //! * Primary sequence length (8 bytes)
-//! * Extended sequence length (8 bytes)
-//! * Primary sequence data (2-bit encoded)
-//! * Primary quality scores (optional)
+//! * Extended sequence length (8 bytes, 0 if not paired)
+//! * Primary sequence data (2-bit or 4-bit encoded)
 //! * Extended sequence data (optional, for paired-end)
-//! * Extended quality scores (optional)
+//! * Primary quality scores (optional, if `qual` flag set)
+//! * Extended quality scores (optional, if paired and `qual` flag set)
+//! * Primary header length (8 bytes, if `headers` flag set)
+//! * Primary header data (UTF-8 string, if `headers` flag set)
+//! * Extended header length (8 bytes, if paired and `headers` flag set)
+//! * Extended header data (UTF-8 string, if paired and `headers` flag set)
+//!
+//! ## Recent Format Changes (v0.7.0+)
+//!
+//! * **Embedded Index**: Index data is now stored within the VBQ file itself, eliminating
+//!   separate `.vqi` files and improving portability.
+//! * **Headers Support**: Optional sequence identifiers can be stored with each record.
+//! * **Extended Capacity**: u64 indexing supports files with more than 4 billion records.
+//! * **Multi-bit Encoding**: Support for both 2-bit and 4-bit nucleotide encodings.
 //!
 //! ## Performance Characteristics
 //!
@@ -63,7 +82,8 @@
 //!
 //! * Independent blocks enable true parallel processing without synchronization
 //! * Memory-mapped access provides efficient I/O
-//! * 2-bit encoding reduces storage requirements
+//! * Embedded index enables fast random access without auxiliary files
+//! * Multi-bit encoding (2-bit/4-bit) optimizes storage for different use cases
 //! * Optional ZSTD compression reduces file size with minimal performance impact
 //!
 //! ## Usage Example
@@ -71,30 +91,32 @@
 //! ```
 //! use std::fs::File;
 //! use std::io::BufWriter;
-//! use binseq::vbq::{VBinseqHeader, VBinseqWriterBuilder, MmapReader};
+//! use binseq::vbq::{VBinseqHeaderBuilder, VBinseqWriterBuilder, MmapReader};
 //! use binseq::BinseqRecord;
 //!
 //! /*
 //!    WRITING
 //! */
 //!
-//! // Create a header for sequences with quality scores
-//! let with_qual = true;
-//! let compressed = true;
-//! let paired = false;
-//! let header = VBinseqHeader::new(with_qual, compressed, paired);
+//! // Create a header for sequences with quality scores and headers
+//! let header = VBinseqHeaderBuilder::new()
+//!     .qual(true)
+//!     .compressed(true)
+//!     .headers(true)
+//!     .build();
 //!
-//! // Create a writer for sequences with quality scores
+//! // Create a writer
 //! let file = File::create("example.vbq").unwrap();
 //! let mut writer = VBinseqWriterBuilder::default()
 //!     .header(header)
 //!     .build(BufWriter::new(file))
 //!     .unwrap();
 //!
-//! // Write a sequence with quality scores
+//! // Write a sequence with quality scores and header
 //! let sequence = b"ACGTACGT";
 //! let quality = b"IIIIFFFF";
-//! writer.write_nucleotides_quality(0, sequence, quality).unwrap();
+//! let header_str = b"sequence_001";
+//! writer.write_record(None, Some(header_str), sequence, Some(quality)).unwrap();
 //! writer.finish().unwrap();
 //!
 //! /*
@@ -107,12 +129,16 @@
 //!
 //! // Process blocks one at a time
 //! let mut seq_buffer = Vec::new();
+//! let mut header_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
 //!         record.decode_s(&mut seq_buffer).unwrap();
+//!         record.sheader(&mut header_buffer);
+//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
 //!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
 //!         println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
 //!         seq_buffer.clear();
+//!         header_buffer.clear();
 //!     }
 //! }
 //! # std::fs::remove_file("example.vbq").unwrap_or(());
@@ -123,7 +149,7 @@ mod index;
 mod reader;
 mod writer;
 
-pub use header::{BlockHeader, VBinseqHeader};
+pub use header::{BlockHeader, VBinseqHeader, VBinseqHeaderBuilder};
 pub use index::{BlockIndex, BlockRange};
 pub use reader::{MmapReader, RecordBlock, RecordBlockIter, RefRecord};
 pub use writer::{VBinseqWriter, VBinseqWriterBuilder};

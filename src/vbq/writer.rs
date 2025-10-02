@@ -1,36 +1,65 @@
 //! Writer implementation for VBINSEQ files
 //!
 //! This module provides functionality for writing sequence data to VBINSEQ files,
-//! including support for compression, quality scores, and paired-end reads.
+//! including support for compression, quality scores, paired-end reads, and sequence headers.
 //!
 //! The VBINSEQ writer implements a block-based approach where records are packed
 //! into fixed-size blocks. Each block has a header containing metadata about the
 //! records it contains. Blocks may be optionally compressed using zstd compression.
 //!
+//! ## Format Changes (v0.7.0+)
+//!
+//! - **Embedded Index**: Writers now automatically embed an index at the end of the file
+//! - **Headers Support**: Optional sequence headers/identifiers can be written with each record
+//! - **Multi-bit Encoding**: Support for 2-bit and 4-bit nucleotide encodings
+//! - **Extended Capacity**: u64 indexing supports more than 4 billion records
+//!
+//! ## File Structure Written
+//!
+//! ```text
+//! [File Header][Data Blocks][Compressed Index][Index Size][Index End Magic]
+//! ```
+//!
+//! The writer automatically:
+//! 1. Writes the file header
+//! 2. Writes data blocks as records are added
+//! 3. Builds an index during writing
+//! 4. On `finish()`, compresses and embeds the index at the end of the file
+//!
 //! # Example
 //!
 //! ```rust,no_run
-//! use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+//! use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
 //! use std::fs::File;
 //!
-//! // Create a VBINSEQ file writer
+//! // Create a VBINSEQ file writer with headers and compression
 //! let file = File::create("example.vbq").unwrap();
-//! let header = VBinseqHeader::with_capacity(128 * 1024, true, true, true);
+//! let header = VBinseqHeaderBuilder::new()
+//!     .block(128 * 1024)
+//!     .qual(true)
+//!     .compressed(true)
+//!     .headers(true)
+//!     .flags(true)
+//!     .build();
 //!
 //! let mut writer = VBinseqWriterBuilder::default()
 //!     .header(header)
 //!     .build(file)
 //!     .unwrap();
 //!
-//! // Write a nucleotide sequence
+//! // Write a nucleotide sequence with quality scores and header
 //! let sequence = b"ACGTACGTACGT";
-//! writer.write_nucleotides(0, sequence).unwrap();
+//! let quality = b"IIIIIIIIIIII";
+//! let header_str = b"sequence_001";
+//! writer.write_record(Some(0), Some(header_str), sequence, Some(quality)).unwrap();
 //!
-//! // Writer will automatically flush when dropped
+//! // Must call finish() to write the embedded index
+//! writer.finish().unwrap();
 //! ```
 
 use std::io::Write;
 
+use bitnuc::BitSize;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -39,6 +68,9 @@ use zstd::Encoder as ZstdEncoder;
 use super::header::{BlockHeader, VBinseqHeader};
 use crate::error::{Result, WriteError};
 use crate::policy::{Policy, RNG_SEED};
+use crate::vbq::header::{SIZE_BLOCK_HEADER, SIZE_HEADER};
+use crate::vbq::index::{IndexHeader, INDEX_END_MAGIC};
+use crate::vbq::{BlockIndex, BlockRange};
 
 /// Calculates the storage size in bytes required for a record without quality scores
 ///
@@ -59,28 +91,23 @@ use crate::policy::{Policy, RNG_SEED};
 /// # Returns
 ///
 /// The total size in bytes needed to store the record
-pub fn record_byte_size(schunk: usize, xchunk: usize) -> usize {
-    8 * (schunk + xchunk + 3)
+pub fn record_byte_size(schunk: usize, xchunk: usize, has_flags: bool) -> usize {
+    8 * (schunk + xchunk + if has_flags { 3 } else { 2 })
 }
 
-/// Calculates the storage size in bytes required for a record with quality scores
-///
-/// This function extends `record_byte_size` to include the additional space
-/// needed for quality scores, which require 1 byte per nucleotide base.
-///
-/// # Parameters
-///
-/// * `schunk` - Number of 64-bit words needed for the primary sequence
-/// * `xchunk` - Number of 64-bit words needed for the extended sequence (0 for single-end)
-/// * `slen` - Length of the primary sequence in bases
-/// * `xlen` - Length of the extended sequence in bases (0 for single-end)
-///
-/// # Returns
-///
-/// The total size in bytes needed to store the record with quality scores
-/// ```
-fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usize) -> usize {
-    record_byte_size(schunk, xchunk) + slen + xlen
+fn record_byte_size_quality_header(
+    schunk: usize,
+    xchunk: usize,
+    squal: usize,
+    xqual: usize,
+    sheader: usize,
+    xheader: usize,
+    has_flags: bool,
+) -> usize {
+    // counting the header length bytes (u64)
+    let bytes_sheader = if sheader > 0 { sheader + 8 } else { 0 };
+    let bytes_xheader = if xheader > 0 { xheader + 8 } else { 0 };
+    record_byte_size(schunk, xchunk, has_flags) + squal + xqual + bytes_sheader + bytes_xheader
 }
 
 /// A builder for creating configured `VBinseqWriter` instances
@@ -92,14 +119,18 @@ fn record_byte_size_quality(schunk: usize, xchunk: usize, slen: usize, xlen: usi
 /// # Examples
 ///
 /// ```rust,no_run
-/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+/// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
 /// use binseq::Policy;
 /// use std::fs::File;
 ///
 /// // Create a writer with custom settings
 /// let file = File::create("example.vbq").unwrap();
 /// let mut writer = VBinseqWriterBuilder::default()
-///     .header(VBinseqHeader::with_capacity(65536, true, true, true))
+///     .header(VBinseqHeaderBuilder::new()
+///         .block(65536)
+///         .qual(true)
+///         .compressed(true)
+///         .build())
 ///     .policy(Policy::IgnoreSequence)
 ///     .build(file)
 ///     .unwrap();
@@ -132,11 +163,15 @@ impl VBinseqWriterBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
+    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeaderBuilder};
     ///
     /// // Create a header with 64KB blocks and quality scores
-    /// let mut header = VBinseqHeader::with_capacity(65536, true, true, true);
-    /// header.qual = true;
+    /// let header = VBinseqHeaderBuilder::new()
+    ///     .block(65536)
+    ///     .qual(true)
+    ///     .paired(true)
+    ///     .compressed(true)
+    ///     .build();
     ///
     /// let builder = VBinseqWriterBuilder::default().header(header);
     /// ```
@@ -277,9 +312,8 @@ impl VBinseqWriterBuilder {
 ///     .unwrap();
 ///
 /// // Write a sequence
-/// let flag = 0; // No special flags
 /// let sequence = b"ACGTACGTACGT";
-/// writer.write_nucleotides(flag, sequence).unwrap();
+/// writer.write_record(None, None, sequence, None).unwrap();
 ///
 /// // Writer automatically flushes when dropped
 /// ```
@@ -296,14 +330,30 @@ pub struct VBinseqWriter<W: Write> {
 
     /// Pre-initialized writer for compressed blocks
     cblock: BlockWriter,
+
+    /// Growable buffer for the block ranges found
+    ranges: Vec<BlockRange>,
+
+    /// Total bytes written to this writer
+    bytes_written: usize,
+
+    /// Total records written to this writer
+    records_written: usize,
+
+    /// Determines if index is already written
+    index_written: bool,
 }
 impl<W: Write> VBinseqWriter<W> {
     pub fn new(inner: W, header: VBinseqHeader, policy: Policy, headless: bool) -> Result<Self> {
         let mut wtr = Self {
             inner,
             header,
-            encoder: Encoder::with_policy(policy),
-            cblock: BlockWriter::new(header.block as usize, header.compressed),
+            encoder: Encoder::with_policy(header.bits, policy),
+            cblock: BlockWriter::new(header.block as usize, header.compressed, header.flags),
+            ranges: Vec::new(),
+            bytes_written: 0,
+            records_written: 0,
+            index_written: false,
         };
         if !headless {
             wtr.init()?;
@@ -322,6 +372,7 @@ impl<W: Write> VBinseqWriter<W> {
     /// * `Err(_)` - If an error occurred during writing
     fn init(&mut self) -> Result<()> {
         self.header.write_bytes(&mut self.inner)?;
+        self.bytes_written += SIZE_HEADER;
         Ok(())
     }
 
@@ -390,66 +441,72 @@ impl<W: Write> VBinseqWriter<W> {
         self.header.qual
     }
 
-    /// Writes a single nucleotide sequence to the file
-    ///
-    /// This method encodes and writes a single nucleotide sequence to the VBINSEQ file.
-    /// It automatically handles block boundaries and will create a new block if the
-    /// current one cannot fit the encoded record.
-    ///
-    /// # Parameters
-    ///
-    /// * `flag` - A 64-bit flag that can store custom metadata about the sequence
-    /// * `sequence` - The nucleotide sequence to write (typically ASCII: A, C, G, T, N)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequence was successfully encoded and written
-    /// * `Ok(false)` - If the sequence could not be encoded (e.g., invalid characters)
-    /// * `Err(_)` - If an error occurred during writing or if the writer is configured
-    ///   for quality scores or paired-end reads
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The writer is configured for quality scores (`WriteError::QualityFlagSet`)
-    /// - The writer is configured for paired-end reads (`WriteError::PairedFlagSet`)
-    /// - An I/O error occurred while writing
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
-    /// use std::fs::File;
-    ///
-    /// let file = File::create("example.vbq").unwrap();
-    /// let mut writer = VBinseqWriterBuilder::default()
-    ///     .build(file)
-    ///     .unwrap();
-    ///
-    /// // Write a sequence with a custom flag
-    /// let flag = 0x1234; // Some arbitrary metadata
-    /// let sequence = b"ACGTACGTACGT";
-    /// writer.write_nucleotides(flag, sequence).unwrap();
-    /// ```
-    pub fn write_nucleotides(&mut self, flag: u64, sequence: &[u8]) -> Result<bool> {
-        // Validate the right write operation is being used
-        if self.header.qual {
-            return Err(WriteError::QualityFlagSet.into());
-        }
-        if self.header.paired {
+    pub fn has_headers(&self) -> bool {
+        self.header.headers
+    }
+
+    pub fn write_record(
+        &mut self,
+        flag: Option<u64>,
+        header: Option<&[u8]>,
+        sequence: &[u8],
+        quality: Option<&[u8]>,
+    ) -> Result<bool> {
+        if self.is_paired() {
             return Err(WriteError::PairedFlagSet.into());
         }
 
+        // ignore the header if not set
+        let header = if header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if header.is_some() && !self.header.headers {
+            None
+        } else {
+            header
+        };
+
+        // ignore the quality if not set
+        let quality = if quality.is_none() && self.header.qual {
+            return Err(WriteError::QualityFlagSet.into());
+        } else if quality.is_some() && !self.header.qual {
+            None
+        } else {
+            quality
+        };
+
         // encode the sequence
         if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
-            let record_size = record_byte_size(sbuffer.len(), 0);
+            let record_size = record_byte_size_quality_header(
+                sbuffer.len(),
+                0,
+                quality.map(|x| x.len()).unwrap_or(0),
+                0,
+                header.map(|x| x.len()).unwrap_or(0),
+                0,
+                self.header.flags,
+            );
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, and sequence to the block
-            self.cblock
-                .write_record(flag, sequence.len() as u64, 0, sbuffer, None, None, None)?;
+            self.cblock.write_record(
+                flag,
+                sequence.len() as u64,
+                0,
+                sbuffer,
+                quality,
+                header,
+                None,
+                None,
+                None,
+            )?;
 
             // Return true if the sequence was successfully written
             Ok(true)
@@ -459,276 +516,84 @@ impl<W: Write> VBinseqWriter<W> {
         }
     }
 
-    /// Writes a paired-end nucleotide sequence to the file
-    ///
-    /// This method encodes and writes a paired-end nucleotide sequence (two related sequences)
-    /// to the VBINSEQ file. It automatically handles block boundaries and will create a new
-    /// block if the current one cannot fit the encoded record.
-    ///
-    /// # Parameters
-    ///
-    /// * `flag` - A 64-bit flag that can store custom metadata about the sequence pair
-    /// * `primary` - The primary nucleotide sequence (typically the forward read)
-    /// * `extended` - The extended nucleotide sequence (typically the reverse read)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequence pair was successfully encoded and written
-    /// * `Ok(false)` - If the sequence pair could not be encoded
-    /// * `Err(_)` - If an error occurred during writing or if the writer is not configured
-    ///   for paired-end reads
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The writer is configured for quality scores (`WriteError::QualityFlagSet`)
-    /// - The writer is not configured for paired-end reads (`WriteError::PairedFlagNotSet`)
-    /// - An I/O error occurred while writing
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
-    /// use std::fs::File;
-    ///
-    /// // Create a header for paired-end reads
-    /// let mut header = VBinseqHeader::default();
-    /// header.paired = true;
-    ///
-    /// let file = File::create("paired_reads.vbq").unwrap();
-    /// let mut writer = VBinseqWriterBuilder::default()
-    ///     .header(header)
-    ///     .build(file)
-    ///     .unwrap();
-    ///
-    /// // Write a paired sequence
-    /// let flag = 0;
-    /// let forward_read = b"ACGTACGTACGT";
-    /// let reverse_read = b"TGCATGCATGCA";
-    /// writer.write_nucleotides_paired(flag, forward_read, reverse_read).unwrap();
-    /// ```
-    pub fn write_nucleotides_paired(
+    pub fn write_paired_record(
         &mut self,
-        flag: u64,
-        primary: &[u8],
-        extended: &[u8],
+        flag: Option<u64>,
+        s_header: Option<&[u8]>,
+        s_sequence: &[u8],
+        s_qual: Option<&[u8]>,
+        x_header: Option<&[u8]>,
+        x_sequence: &[u8],
+        x_qual: Option<&[u8]>,
     ) -> Result<bool> {
-        // Validate the right write operation is being used
-        if self.header.qual {
+        if !self.is_paired() {
+            return Err(WriteError::PairedFlagNotSet.into());
+        }
+
+        let s_header = if s_header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if s_header.is_some() && !self.header.headers {
+            None
+        } else {
+            s_header
+        };
+        let x_header = if x_header.is_none() && self.header.headers {
+            return Err(WriteError::HeaderFlagSet.into());
+        } else if x_header.is_some() && !self.header.headers {
+            None
+        } else {
+            x_header
+        };
+
+        let s_qual = if s_qual.is_none() && self.header.qual {
             return Err(WriteError::QualityFlagSet.into());
-        }
-        if !self.header.paired {
-            return Err(WriteError::PairedFlagNotSet.into());
-        }
-
-        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(primary, extended)? {
-            // Check if the current block can handle the next record
-            let record_size = record_byte_size(sbuffer.len(), xbuffer.len());
-            if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
-            }
-
-            // Write the flag, length, and sequence to the block
-            self.cblock.write_record(
-                flag,
-                primary.len() as u64,
-                extended.len() as u64,
-                sbuffer,
-                None,
-                Some(xbuffer),
-                None,
-            )?;
-
-            // Return true if the record was successfully written
-            Ok(true)
+        } else if s_qual.is_some() && !self.header.qual {
+            None
         } else {
-            // Return false if the record was not successfully written
-            Ok(false)
-        }
-    }
+            s_qual
+        };
 
-    /// Writes a nucleotide sequence with quality scores to the file
-    ///
-    /// This method encodes and writes a single nucleotide sequence with corresponding
-    /// quality scores to the VBINSEQ file. Quality scores are typically in the Phred scale
-    /// (encoded as ASCII characters). It automatically handles block boundaries and will
-    /// create a new block if the current one cannot fit the encoded record.
-    ///
-    /// # Parameters
-    ///
-    /// * `flag` - A 64-bit flag that can store custom metadata about the sequence
-    /// * `sequence` - The nucleotide sequence to write (typically ASCII: A, C, G, T, N)
-    /// * `quality` - The quality scores corresponding to each base in the sequence
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequence and quality scores were successfully encoded and written
-    /// * `Ok(false)` - If the sequence could not be encoded
-    /// * `Err(_)` - If an error occurred during writing or if the writer is not configured
-    ///   for quality scores
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The writer is not configured for quality scores (`WriteError::QualityFlagNotSet`)
-    /// - The writer is configured for paired-end reads (`WriteError::PairedFlagSet`)
-    /// - An I/O error occurred while writing
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
-    /// use std::fs::File;
-    ///
-    /// // Create a header for sequences with quality scores
-    /// let mut header = VBinseqHeader::default();
-    /// header.qual = true;
-    ///
-    /// let file = File::create("reads_with_quality.vbq").unwrap();
-    /// let mut writer = VBinseqWriterBuilder::default()
-    ///     .header(header)
-    ///     .build(file)
-    ///     .unwrap();
-    ///
-    /// // Write a sequence with quality scores
-    /// let flag = 0;
-    /// let sequence = b"ACGTACGTACGT";
-    /// let quality = b"IIIIIIEEEEEE"; // Example quality scores in ASCII format
-    /// writer.write_nucleotides_quality(flag, sequence, quality).unwrap();
-    /// ```
-    pub fn write_nucleotides_quality(
-        &mut self,
-        flag: u64,
-        sequence: &[u8],
-        quality: &[u8],
-    ) -> Result<bool> {
-        // Validate the right write operation is being used
-        if !self.header.qual {
-            return Err(WriteError::QualityFlagNotSet.into());
-        }
-        if self.header.paired {
-            return Err(WriteError::PairedFlagSet.into());
-        }
+        let x_qual = if x_qual.is_none() && self.header.qual {
+            return Err(WriteError::QualityFlagSet.into());
+        } else if x_qual.is_some() && !self.header.qual {
+            None
+        } else {
+            x_qual
+        };
 
-        if let Some(sbuffer) = self.encoder.encode_single(sequence)? {
+        // encode the sequences
+        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(s_sequence, x_sequence)? {
             // Check if the current block can handle the next record
-            let record_size = record_byte_size_quality(sbuffer.len(), 0, quality.len(), 0);
+            let record_size = record_byte_size_quality_header(
+                sbuffer.len(),
+                xbuffer.len(),
+                s_qual.map(|x| x.len()).unwrap_or(0),
+                x_qual.map(|x| x.len()).unwrap_or(0),
+                s_header.map(|x| x.len()).unwrap_or(0),
+                x_header.map(|x| x.len()).unwrap_or(0),
+                self.header.flags,
+            );
             if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
+                impl_flush_block(
+                    &mut self.inner,
+                    &mut self.cblock,
+                    &mut self.ranges,
+                    &mut self.bytes_written,
+                    &mut self.records_written,
+                )?;
             }
 
             // Write the flag, length, sequence, and quality scores to the block
             self.cblock.write_record(
                 flag,
-                sequence.len() as u64,
-                0,
+                s_sequence.len() as u64,
+                x_sequence.len() as u64,
                 sbuffer,
-                Some(quality),
-                None,
-                None,
-            )?;
-
-            // Return true if the record was written successfully
-            Ok(true)
-        } else {
-            // Return false if the record was not written successfully
-            Ok(false)
-        }
-    }
-
-    /// Writes paired-end nucleotide sequences with quality scores to the file
-    ///
-    /// This method encodes and writes paired-end nucleotide sequences with their corresponding
-    /// quality scores to the VBINSEQ file. It's designed for paired-end sequencing data where
-    /// each fragment is sequenced from both ends. The method automatically handles block
-    /// boundaries and will create a new block if the current one cannot fit the encoded record.
-    ///
-    /// # Parameters
-    ///
-    /// * `flag` - A 64-bit flag that can store custom metadata about the sequence pair
-    /// * `s_seq` - The primary nucleotide sequence (typically the forward read)
-    /// * `x_seq` - The extended nucleotide sequence (typically the reverse read)
-    /// * `s_qual` - The quality scores corresponding to each base in the primary sequence
-    /// * `x_qual` - The quality scores corresponding to each base in the extended sequence
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If the sequences and quality scores were successfully encoded and written
-    /// * `Ok(false)` - If the sequences could not be encoded
-    /// * `Err(_)` - If an error occurred during writing or if the writer is not configured
-    ///   for quality scores and paired-end reads
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The writer is not configured for quality scores (`WriteError::QualityFlagNotSet`)
-    /// - The writer is not configured for paired-end reads (`WriteError::PairedFlagNotSet`)
-    /// - An I/O error occurred while writing
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use binseq::vbq::{VBinseqWriterBuilder, VBinseqHeader};
-    /// use std::fs::File;
-    ///
-    /// // Create a header for paired-end reads with quality scores
-    /// let mut header = VBinseqHeader::default();
-    /// header.qual = true;
-    /// header.paired = true;
-    ///
-    /// let file = File::create("paired_reads_with_quality.vbq").unwrap();
-    /// let mut writer = VBinseqWriterBuilder::default()
-    ///     .header(header)
-    ///     .build(file)
-    ///     .unwrap();
-    ///
-    /// // Write paired sequences with quality scores
-    /// let flag = 0;
-    /// let forward_read = b"ACGTACGTACGT";
-    /// let reverse_read = b"TGCATGCATGCA";
-    /// let forward_quality = b"IIIIIIEEEEEE"; // Example quality scores
-    /// let reverse_quality = b"EEEEEEIIIIEE"; // Example quality scores
-    /// writer.write_nucleotides_quality_paired(
-    ///     flag,
-    ///     forward_read,
-    ///     reverse_read,
-    ///     forward_quality,
-    ///     reverse_quality
-    /// ).unwrap();
-    /// ```
-    pub fn write_nucleotides_quality_paired(
-        &mut self,
-        flag: u64,
-        s_seq: &[u8],
-        x_seq: &[u8],
-        s_qual: &[u8],
-        x_qual: &[u8],
-    ) -> Result<bool> {
-        // Validate the right write operation is being used
-        if !self.header.qual {
-            return Err(WriteError::QualityFlagNotSet.into());
-        }
-        if !self.header.paired {
-            return Err(WriteError::PairedFlagNotSet.into());
-        }
-
-        if let Some((sbuffer, xbuffer)) = self.encoder.encode_paired(s_seq, x_seq)? {
-            // Check if the current block can handle the next record
-            let record_size =
-                record_byte_size_quality(sbuffer.len(), xbuffer.len(), s_qual.len(), x_qual.len());
-            if self.cblock.exceeds_block_size(record_size)? {
-                self.cblock.flush(&mut self.inner)?;
-            }
-
-            // Write the flag, length, sequence, and quality scores to the block
-            self.cblock.write_record(
-                flag,
-                s_seq.len() as u64,
-                x_seq.len() as u64,
-                sbuffer,
-                Some(s_qual),
+                s_qual,
+                s_header,
                 Some(xbuffer),
-                Some(x_qual),
+                x_qual,
+                x_header,
             )?;
 
             // Return true if the record was successfully written
@@ -764,7 +629,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///
     /// // Write some sequences...
     /// let sequence = b"ACGTACGTACGT";
-    /// writer.write_nucleotides(0, sequence).unwrap();
+    /// writer.write_record(None, None, sequence, None).unwrap();
     ///
     /// // Manually finish and check for errors
     /// if let Err(e) = writer.finish() {
@@ -772,8 +637,19 @@ impl<W: Write> VBinseqWriter<W> {
     /// }
     /// ```
     pub fn finish(&mut self) -> Result<()> {
-        self.cblock.flush(&mut self.inner)?;
+        impl_flush_block(
+            &mut self.inner,
+            &mut self.cblock,
+            &mut self.ranges,
+            &mut self.bytes_written,
+            &mut self.records_written,
+        )?;
         self.inner.flush()?;
+
+        if !self.index_written {
+            self.write_index()?;
+            self.index_written = true;
+        }
         Ok(())
     }
 
@@ -828,7 +704,7 @@ impl<W: Write> VBinseqWriter<W> {
     ///     .unwrap();
     ///
     /// // Write some data to the memory writer
-    /// mem_writer.write_nucleotides(0, b"ACGTACGT").unwrap();
+    /// mem_writer.write_record(None, None, b"ACGTACGT", None).unwrap();
     ///
     /// // Ingest data from memory writer into file writer
     /// file_writer.ingest(&mut mem_writer).unwrap();
@@ -845,12 +721,93 @@ impl<W: Write> VBinseqWriter<W> {
             other.by_ref().clear();
         }
 
+        // Pull the ranges from the other writer and update their statistics
+        {
+            for range in other.ranges.drain(..) {
+                // Build the updated range with main-file specific information
+                let updated_range = BlockRange::new(
+                    self.bytes_written as u64, // Current position in main file
+                    range.len,
+                    range.block_records,
+                    self.records_written as u64, // Current number of records written in main file
+                );
+
+                self.ranges.push(updated_range);
+
+                // Update counters incrementally for each range
+                self.bytes_written += (range.len + SIZE_BLOCK_HEADER as u64) as usize;
+                self.records_written += range.block_records as usize;
+            }
+
+            // reset the other writer
+            other.bytes_written = 0;
+            other.records_written = 0;
+        }
+
         // Ingest incomplete block from other
         {
-            self.cblock.ingest(other.cblock_mut(), &mut self.inner)?;
+            let header = self.cblock.ingest(other.cblock_mut(), &mut self.inner)?;
+            if !header.is_empty() {
+                let range = BlockRange::new(
+                    self.bytes_written as u64,
+                    header.size,
+                    header.records,
+                    self.records_written as u64,
+                );
+                self.ranges.push(range);
+                self.bytes_written += header.size_with_header();
+                self.records_written += header.records as usize;
+            }
         }
         Ok(())
     }
+
+    pub fn write_index(&mut self) -> Result<()> {
+        // Build the index
+        let index_header = IndexHeader::new(self.bytes_written as u64);
+        let block_index = BlockIndex {
+            header: index_header,
+            ranges: self.ranges.clone(),
+        };
+
+        // Write the index to a temporary buffer
+        let mut buffer = Vec::new();
+        block_index.write_bytes(&mut buffer)?;
+
+        // Determine the number of bytes written to the buffer
+        let n_bytes = buffer.len() as u64;
+
+        // Write the index to the underlying writer
+        self.inner.write_all(&buffer)?;
+
+        // Write the number of bytes written to the index
+        self.inner.write_u64::<LittleEndian>(n_bytes)?;
+
+        // Write the index footer magic
+        self.inner.write_u64::<LittleEndian>(INDEX_END_MAGIC)?;
+
+        Ok(())
+    }
+}
+
+fn impl_flush_block<W: Write>(
+    writer: &mut W,
+    cblock: &mut BlockWriter,
+    ranges: &mut Vec<BlockRange>,
+    bytes_written: &mut usize,
+    records_written: &mut usize,
+) -> Result<()> {
+    let block_header = cblock.flush(writer)?;
+    let range = BlockRange::new(
+        *bytes_written as u64,
+        block_header.size,
+        block_header.records,
+        *records_written as u64,
+    );
+    ranges.push(range);
+    *bytes_written += block_header.size_with_header();
+    *records_written += block_header.records as usize;
+    Ok(())
 }
 
 impl<W: Write> Drop for VBinseqWriter<W> {
@@ -879,9 +836,11 @@ struct BlockWriter {
     /// Compression flag
     /// If false, the block is written uncompressed
     compress: bool,
+    /// Has flags
+    has_flags: bool,
 }
 impl BlockWriter {
-    fn new(block_size: usize, compress: bool) -> Self {
+    fn new(block_size: usize, compress: bool, has_flags: bool) -> Self {
         Self {
             pos: 0,
             starts: Vec::default(),
@@ -891,6 +850,7 @@ impl BlockWriter {
             zbuf: Vec::with_capacity(block_size),
             padding: vec![0; block_size],
             compress,
+            has_flags,
         }
     }
 
@@ -908,19 +868,23 @@ impl BlockWriter {
     #[allow(clippy::too_many_arguments)]
     fn write_record(
         &mut self,
-        flag: u64,
+        flag: Option<u64>,
         slen: u64,
         xlen: u64,
         sbuf: &[u64],
         squal: Option<&[u8]>,
+        sheader: Option<&[u8]>,
         xbuf: Option<&[u64]>,
         xqual: Option<&[u8]>,
+        xheader: Option<&[u8]>,
     ) -> Result<()> {
         // Tracks the record start position
         self.starts.push(self.pos);
 
         // Write the flag
-        self.write_flag(flag)?;
+        if self.has_flags {
+            self.write_flag(flag.unwrap_or(0))?;
+        }
 
         // Write the lengths
         self.write_length(slen)?;
@@ -929,7 +893,11 @@ impl BlockWriter {
         // Write the primary sequence and optional quality
         self.write_buffer(sbuf)?;
         if let Some(qual) = squal {
-            self.write_quality(qual)?;
+            self.write_u8buf(qual)?;
+        }
+        if let Some(sheader) = sheader {
+            self.write_length(sheader.len() as u64)?;
+            self.write_u8buf(sheader)?;
         }
 
         // Write the optional extended sequence and optional quality
@@ -937,7 +905,11 @@ impl BlockWriter {
             self.write_buffer(xbuf)?;
         }
         if let Some(qual) = xqual {
-            self.write_quality(qual)?;
+            self.write_u8buf(qual)?;
+        }
+        if let Some(xheader) = xheader {
+            self.write_length(xheader.len() as u64)?;
+            self.write_u8buf(xheader)?;
         }
 
         Ok(())
@@ -962,13 +934,13 @@ impl BlockWriter {
         Ok(())
     }
 
-    fn write_quality(&mut self, quality: &[u8]) -> Result<()> {
-        self.ubuf.write_all(quality)?;
-        self.pos += quality.len();
+    fn write_u8buf(&mut self, buf: &[u8]) -> Result<()> {
+        self.ubuf.write_all(buf)?;
+        self.pos += buf.len();
         Ok(())
     }
 
-    fn flush_compressed<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush_compressed<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Encode the block
         let mut encoder = ZstdEncoder::new(&mut self.zbuf, self.level)?;
         encoder.write_all(&self.ubuf)?;
@@ -981,10 +953,10 @@ impl BlockWriter {
         header.write_bytes(inner)?;
         inner.write_all(&self.zbuf)?;
 
-        Ok(())
+        Ok(header)
     }
 
-    fn flush_uncompressed<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush_uncompressed<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Build a block header (this is static in size in the uncompressed case)
         let header = BlockHeader::new(self.block_size as u64, self.starts.len() as u32);
 
@@ -992,13 +964,13 @@ impl BlockWriter {
         header.write_bytes(inner)?;
         inner.write_all(&self.ubuf)?;
 
-        Ok(())
+        Ok(header)
     }
 
-    fn flush<W: Write>(&mut self, inner: &mut W) -> Result<()> {
+    fn flush<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Skip if the block is empty
         if self.pos == 0 {
-            return Ok(());
+            return Ok(BlockHeader::empty());
         }
 
         // Finish out the block with padding
@@ -1006,16 +978,16 @@ impl BlockWriter {
         self.ubuf.write_all(&self.padding[..bytes_to_next_start])?;
 
         // Flush the block (implemented differently based on compression)
-        if self.compress {
-            self.flush_compressed(inner)?;
+        let header = if self.compress {
+            self.flush_compressed(inner)
         } else {
-            self.flush_uncompressed(inner)?;
-        }
+            self.flush_uncompressed(inner)
+        }?;
 
         // Reset the position and buffers
         self.clear();
 
-        Ok(())
+        Ok(header)
     }
 
     fn clear(&mut self) {
@@ -1032,7 +1004,7 @@ impl BlockWriter {
     ///
     /// I.e. the bytes can either all fit directly into self.ubuf or an intermediate
     /// flush step is required.
-    fn ingest<W: Write>(&mut self, other: &mut Self, inner: &mut W) -> Result<()> {
+    fn ingest<W: Write>(&mut self, other: &mut Self, inner: &mut W) -> Result<BlockHeader> {
         if self.block_size != other.block_size {
             return Err(
                 WriteError::IncompatibleBlockSizes(self.block_size, other.block_size).into(),
@@ -1043,11 +1015,13 @@ impl BlockWriter {
 
         // Quick ingestion (take all without flush)
         if other.pos <= remaining {
-            self.ingest_all(other)
+            self.ingest_all(other)?;
+            Ok(BlockHeader::empty())
         } else {
             self.ingest_subset(other)?;
-            self.flush(inner)?;
-            self.ingest_all(other)
+            let header = self.flush(inner)?;
+            self.ingest_all(other)?;
+            Ok(header)
         }
     }
 
@@ -1120,6 +1094,9 @@ impl BlockWriter {
 /// Encapsulates the logic for encoding sequences into a binary format.
 #[derive(Clone)]
 pub struct Encoder {
+    /// Bitsize of the nucleotides
+    bitsize: BitSize,
+
     /// Reusable buffers for all nucleotides (written as 2-bit after conversion)
     sbuffer: Vec<u64>,
     xbuffer: Vec<u64>,
@@ -1135,16 +1112,11 @@ pub struct Encoder {
     rng: SmallRng,
 }
 
-impl Default for Encoder {
-    fn default() -> Self {
-        Self::with_policy(Policy::default())
-    }
-}
-
 impl Encoder {
     /// Initialize a new encoder with the given policy.
-    pub fn with_policy(policy: Policy) -> Self {
+    pub fn with_policy(bitsize: BitSize, policy: Policy) -> Self {
         Self {
+            bitsize,
             policy,
             sbuffer: Vec::default(),
             xbuffer: Vec::default(),
@@ -1158,15 +1130,15 @@ impl Encoder {
     ///
     /// Will return `None` if the sequence is invalid and the policy does not allow correction.
     pub fn encode_single(&mut self, primary: &[u8]) -> Result<Option<&[u64]>> {
-        // Fill the buffer with the 2-bit representation of the nucleotides
+        // Fill the buffer with the bit representation of the nucleotides
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err() {
+        if self.bitsize.encode(primary, &mut self.sbuffer).is_err() {
             self.clear();
             if self
                 .policy
                 .handle(primary, &mut self.s_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.bitsize.encode(&self.s_ibuf, &mut self.sbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -1183,8 +1155,8 @@ impl Encoder {
         extended: &[u8],
     ) -> Result<Option<(&[u64], &[u64])>> {
         self.clear();
-        if bitnuc::encode(primary, &mut self.sbuffer).is_err()
-            || bitnuc::encode(extended, &mut self.xbuffer).is_err()
+        if self.bitsize.encode(primary, &mut self.sbuffer).is_err()
+            || self.bitsize.encode(extended, &mut self.xbuffer).is_err()
         {
             self.clear();
             if self
@@ -1194,8 +1166,8 @@ impl Encoder {
                     .policy
                     .handle(extended, &mut self.x_ibuf, &mut self.rng)?
             {
-                bitnuc::encode(&self.s_ibuf, &mut self.sbuffer)?;
-                bitnuc::encode(&self.x_ibuf, &mut self.xbuffer)?;
+                self.bitsize.encode(&self.s_ibuf, &mut self.sbuffer)?;
+                self.bitsize.encode(&self.x_ibuf, &mut self.xbuffer)?;
             } else {
                 return Ok(None);
             }
@@ -1215,7 +1187,7 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vbq::header::SIZE_HEADER;
+    use crate::vbq::{header::SIZE_HEADER, VBinseqHeaderBuilder};
 
     #[test]
     fn test_headless_writer() -> super::Result<()> {
@@ -1235,7 +1207,7 @@ mod tests {
     #[test]
     fn test_ingest_empty_writer() -> super::Result<()> {
         // Test ingesting from an empty writer
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer that's empty
         let mut source = VBinseqWriterBuilder::default()
@@ -1265,7 +1237,7 @@ mod tests {
     #[test]
     fn test_ingest_single_record() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1275,7 +1247,12 @@ mod tests {
 
         // Write a single sequence
         let seq = b"ACGTACGTACGT";
-        source.write_nucleotides(1, seq)?;
+        source.write_record(
+            Some(1), // flag
+            None,    // header
+            seq,     // sequence
+            None,    // quality
+        )?;
 
         // We have not crossed a boundary
         assert!(source.by_ref().is_empty());
@@ -1311,7 +1288,7 @@ mod tests {
     #[test]
     fn test_ingest_multi_record() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1322,7 +1299,7 @@ mod tests {
         // Write multiple sequences
         for _ in 0..30 {
             let seq = b"ACGTACGTACGT";
-            source.write_nucleotides(1, seq)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
         // We have not crossed a boundary
         assert!(source.by_ref().is_empty());
@@ -1358,7 +1335,7 @@ mod tests {
     #[test]
     fn test_ingest_block_boundary() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, false, false);
+        let header = VBinseqHeaderBuilder::new().build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1369,7 +1346,7 @@ mod tests {
         // Write multiple sequences (will cross boundary)
         for _ in 0..30000 {
             let seq = b"ACGTACGTACGT";
-            source.write_nucleotides(1, seq)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
 
         // We have crossed a boundary
@@ -1406,8 +1383,8 @@ mod tests {
     #[test]
     fn test_ingest_with_quality_scores() -> super::Result<()> {
         // Test ingesting records with quality scores
-        let source_header = VBinseqHeader::new(true, false, false); // with quality
-        let dest_header = VBinseqHeader::new(true, false, false); // with quality
+        let source_header = VBinseqHeaderBuilder::new().qual(true).build();
+        let dest_header = VBinseqHeaderBuilder::new().qual(true).build();
 
         // Create a source writer with quality scores
         let mut source = VBinseqWriterBuilder::default()
@@ -1420,7 +1397,7 @@ mod tests {
             let seq = b"ACGTACGTACGT";
             // Simple quality scores (all the same for this test)
             let qual = vec![40; seq.len()];
-            source.write_nucleotides_quality(i, seq, &qual)?;
+            source.write_record(Some(i), None, seq, Some(&qual))?;
         }
 
         // Create a destination writer
@@ -1446,7 +1423,7 @@ mod tests {
     #[test]
     fn test_ingest_with_compression() -> super::Result<()> {
         // Test ingesting a single record
-        let header = VBinseqHeader::new(false, true, false);
+        let header = VBinseqHeaderBuilder::new().compressed(true).build();
 
         // Create a source writer with a single record
         let mut source = VBinseqWriterBuilder::default()
@@ -1457,7 +1434,7 @@ mod tests {
         // Write multiple sequences (will cross boundary)
         for _ in 0..30000 {
             let seq = b"ACGTACGTACGT";
-            source.write_nucleotides(1, seq)?;
+            source.write_record(Some(1), None, seq, None)?;
         }
 
         // Create a destination writer
@@ -1490,8 +1467,8 @@ mod tests {
 
     #[test]
     fn test_ingest_incompatible_headers() -> super::Result<()> {
-        let source_header = VBinseqHeader::new(false, false, false);
-        let dest_header = VBinseqHeader::new(true, false, false);
+        let source_header = VBinseqHeaderBuilder::new().build();
+        let dest_header = VBinseqHeaderBuilder::new().qual(true).build();
 
         // Create a source writer with quality scores
         let mut source = VBinseqWriterBuilder::default()
@@ -1514,20 +1491,10 @@ mod tests {
     #[test]
     #[allow(clippy::identity_op)]
     fn test_record_byte_size() {
-        let size = record_byte_size(2, 0);
+        let size = record_byte_size(2, 0, true);
         assert_eq!(size, 8 * (2 + 0 + 3)); // 40 bytes
 
-        let size = record_byte_size(4, 8);
+        let size = record_byte_size(4, 8, true);
         assert_eq!(size, 8 * (4 + 8 + 3)); // 128 bytes
-    }
-
-    #[test]
-    #[allow(clippy::identity_op)]
-    fn test_record_byte_size_quality() {
-        let size = record_byte_size_quality(2, 0, 12, 0);
-        assert_eq!(size, (8 * (2 + 0 + 3)) + 12); // 52 bytes
-
-        let size = record_byte_size_quality(4, 8, 16, 0);
-        assert_eq!(size, (8 * (4 + 8 + 3)) + 16); // 144 bytes
     }
 }
