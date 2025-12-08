@@ -43,7 +43,7 @@ pub enum Error {
     #[error("Bitnuc error: {0}")]
     BitnucError(#[from] bitnuc::Error),
 
-    /// Generic errors for other unexpected situations
+    /// Conversion errors from anyhow errors
     #[error("Generic error: {0}")]
     AnyhowError(#[from] anyhow::Error),
 
