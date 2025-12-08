@@ -2,6 +2,7 @@ use crate::{BinseqRecord, Result};
 
 pub const DEFAULT_QUALITY: u8 = b'?';
 
+/// A context for storing reusable buffers for internal sequence data.
 #[derive(Clone, Debug, Default)]
 pub struct Context {
     sbuf: Vec<u8>,
@@ -14,24 +15,36 @@ pub struct Context {
     xqual: Vec<u8>,
 }
 impl Context {
+    /// Buffer for primary sequence data
     pub fn sbuf(&self) -> &[u8] {
         &self.sbuf
     }
+    /// Buffer for extended sequence data
     pub fn xbuf(&self) -> &[u8] {
         &self.xbuf
     }
+
+    /// Buffer for primary sequence header
     pub fn sheader(&self) -> &[u8] {
         &self.sheader
     }
+
+    /// Buffer for extended sequence header
     pub fn xheader(&self) -> &[u8] {
         &self.xheader
     }
+
+    /// Buffer for primary sequence quality scores
     pub fn squal(&self) -> &[u8] {
         &self.squal
     }
+
+    /// Buffer for extended sequence quality scores
     pub fn xqual(&self) -> &[u8] {
         &self.xqual
     }
+
+    /// Clear all buffers
     pub fn clear(&mut self) {
         self.sbuf.clear();
         self.xbuf.clear();
