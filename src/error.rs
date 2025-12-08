@@ -293,3 +293,22 @@ where
         Error::GenericError(Box::new(self))
     }
 }
+
+pub mod testing {
+    #[allow(unused)]
+    use super::*;
+    use thiserror::Error;
+
+    #[derive(Error, Debug)]
+    pub enum MyError {
+        #[error("Custom error: {0}")]
+        CustomError(String),
+    }
+
+    #[test]
+    fn test_into_binseq_error() {
+        let my_error = MyError::CustomError(String::from("some error"));
+        let binseq_error = my_error.into_binseq_error();
+        assert!(matches!(binseq_error, Error::GenericError(_)));
+    }
+}
