@@ -108,6 +108,8 @@ impl Context {
     }
 
     /// Fill the context with *only* sequence data from the record.
+    ///
+    /// Note: Clears the context before filling it with data.
     pub fn fill_sequences<R: BinseqRecord>(&mut self, record: R) -> Result<()> {
         self.clear();
 
