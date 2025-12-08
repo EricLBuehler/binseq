@@ -1,3 +1,5 @@
+use std::error::Error as StdError;
+
 /// Custom Result type for binseq operations, wrapping the custom [`Error`] type
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -41,9 +43,13 @@ pub enum Error {
     #[error("Bitnuc error: {0}")]
     BitnucError(#[from] bitnuc::Error),
 
-    /// Generic errors for other unexpected situations
+    /// Conversion errors from anyhow errors
     #[error("Generic error: {0}")]
     AnyhowError(#[from] anyhow::Error),
+
+    /// Generic errors for other unexpected situations
+    #[error("Generic error: {0}")]
+    GenericError(#[from] Box<dyn StdError + Send + Sync>),
 }
 impl Error {
     /// Checks if the error is an index mismatch error
@@ -271,4 +277,38 @@ pub enum ExtensionError {
     /// When the extension is not supported
     #[error("Unsupported extension in path: {0}")]
     UnsupportedExtension(String),
+}
+
+/// Trait for converting arbitrary errors into `Error`
+pub trait IntoBinseqError {
+    fn into_binseq_error(self) -> Error;
+}
+
+// Implement conversion for Box<dyn Error>
+impl<E> IntoBinseqError for E
+where
+    E: StdError + Send + Sync + 'static,
+{
+    fn into_binseq_error(self) -> Error {
+        Error::GenericError(Box::new(self))
+    }
+}
+
+pub mod testing {
+    #[allow(unused)]
+    use super::*;
+    use thiserror::Error;
+
+    #[derive(Error, Debug)]
+    pub enum MyError {
+        #[error("Custom error: {0}")]
+        CustomError(String),
+    }
+
+    #[test]
+    fn test_into_binseq_error() {
+        let my_error = MyError::CustomError(String::from("some error"));
+        let binseq_error = my_error.into_binseq_error();
+        assert!(matches!(binseq_error, Error::GenericError(_)));
+    }
 }
