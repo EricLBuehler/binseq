@@ -1,5 +1,7 @@
 use crate::{BinseqRecord, Result};
 
+pub const DEFAULT_QUALITY: u8 = b'?';
+
 #[derive(Clone, Debug, Default)]
 pub struct Context {
     sbuf: Vec<u8>,
@@ -39,6 +41,22 @@ impl Context {
         self.xqual.clear();
     }
 
+    /// Fill missing quality scores with default value on primary sequence
+    pub fn fill_missing_squal(&mut self) {
+        if self.squal.len() != self.sbuf.len() {
+            self.squal.clear();
+            self.squal.resize(self.sbuf.len(), DEFAULT_QUALITY);
+        }
+    }
+
+    /// Fill missing quality scores with default value on extended sequence
+    pub fn fill_missing_xqual(&mut self) {
+        if self.xqual.len() != self.xbuf.len() {
+            self.xqual.clear();
+            self.xqual.resize(self.xbuf.len(), DEFAULT_QUALITY);
+        }
+    }
+
     /// Fill the context with *only* sequence data from the record.
     pub fn fill_sequences<R: BinseqRecord>(&mut self, record: R) -> Result<()> {
         self.clear();
@@ -67,6 +85,9 @@ impl Context {
             record.decode_s(&mut self.sbuf)?;
             record.sheader(&mut self.sheader);
             self.squal.extend_from_slice(record.squal());
+            if self.squal.is_empty() {
+                self.fill_missing_squal();
+            }
         }
 
         // Extended sequence
@@ -74,6 +95,9 @@ impl Context {
             record.decode_x(&mut self.xbuf)?;
             record.xheader(&mut self.xheader);
             self.xqual.extend_from_slice(record.xqual());
+            if self.xqual.is_empty() {
+                self.fill_missing_xqual();
+            }
         }
 
         Ok(())
