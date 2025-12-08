@@ -323,7 +323,7 @@ impl MmapReader {
         let config = RecordConfig::from_header(&header);
 
         // Immediately validate the size of the file against the expected byte size of records
-        if (mmap.len() - SIZE_HEADER) % config.record_size_bytes() != 0 {
+        if !(mmap.len() - SIZE_HEADER).is_multiple_of(config.record_size_bytes()) {
             return Err(ReadError::FileTruncation(mmap.len()).into());
         }
 

@@ -17,15 +17,15 @@
 //! ```
 //!
 //! Where:
-//! - **Compressed Index**: ZSTD-compressed index data (IndexHeader + BlockRanges)
+//! - **Compressed Index**: ZSTD-compressed index data (`IndexHeader` + `BlockRanges`)
 //! - **Index Size**: 8 bytes indicating size of compressed index data
-//! - **INDEX_END_MAGIC**: 8 bytes (`0x444E455845444E49` = "INDEXEND")
+//! - **`INDEX_END_MAGIC`**: 8 bytes (`0x444E455845444E49` = "INDEXEND")
 //!
 //! ## Index Contents
 //!
 //! The compressed index contains:
-//! 1. **IndexHeader** (32 bytes): Metadata about the indexed file
-//! 2. **BlockRange entries** (32 bytes each): One per data block
+//! 1. **`IndexHeader`** (32 bytes): Metadata about the indexed file
+//! 2. **`BlockRange` entries** (32 bytes each): One per data block
 //!
 //! ## Key Changes from v0.6.x
 //!
@@ -597,7 +597,7 @@ impl BlockIndex {
                 record_total,
             ));
             pos += SIZE_BLOCK_HEADER + block_header.size as usize;
-            record_total += block_header.records as u64;
+            record_total += u64::from(block_header.records);
         }
 
         Ok(index)
@@ -707,7 +707,7 @@ impl BlockIndex {
         self.ranges
             .iter()
             .next_back()
-            .map(|r| (r.cumulative_records + r.block_records as u64) as usize)
+            .map(|r| (r.cumulative_records + u64::from(r.block_records)) as usize)
             .unwrap_or_default()
     }
 }

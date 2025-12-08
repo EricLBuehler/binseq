@@ -3,84 +3,64 @@ use std::io::{stdout, BufWriter, Write};
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader};
+use binseq::{BinseqReader, BinseqRecord, Context, ParallelProcessor, ParallelReader};
 use parking_lot::Mutex;
 
 /// A struct for decoding BINSEQ data back to FASTQ format.
 #[derive(Clone)]
 pub struct Decoder {
-    /// Local values
-    buffer: Vec<u8>,
-    /// Local buffer for decoding index
-    ibuf: itoa::Buffer,
-    /// Local buffer for decoding primary
-    sbuf: Vec<u8>,
-    /// Local buffer for decoding secondary
-    xbuf: Vec<u8>,
+    /// Reusable context
+    ctx: Context,
+
+    /// local output buffer
+    local_writer: Vec<u8>,
+
+    /// global output buffer
+    global_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+
     /// Local count of records
     local_count: usize,
-    /// Quality buffer
-    quality: Vec<u8>,
 
-    ///  values
-    global_buffer: Arc<Mutex<Box<dyn Write + Send>>>,
-    num_records: Arc<Mutex<usize>>,
+    /// global count of records
+    global_count: Arc<Mutex<usize>>,
 }
 
 impl Decoder {
     #[must_use]
     pub fn new(writer: Box<dyn Write + Send>) -> Self {
-        let global_buffer = Arc::new(Mutex::new(writer));
+        let global_writer = Arc::new(Mutex::new(writer));
         Decoder {
-            buffer: Vec::new(),
-            ibuf: itoa::Buffer::new(),
-            sbuf: Vec::new(),
-            xbuf: Vec::new(),
+            local_writer: Vec::new(),
+            ctx: Context::default(),
             local_count: 0,
-            quality: Vec::new(),
-            global_buffer,
-            num_records: Arc::new(Mutex::new(0)),
+            global_writer,
+            global_count: Arc::new(Mutex::new(0)),
         }
     }
 
     #[must_use]
     pub fn num_records(&self) -> usize {
-        *self.num_records.lock()
+        *self.global_count.lock()
     }
 }
 impl ParallelProcessor for Decoder {
     fn process_record<R: BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
-        // clear decoding buffers
-        self.sbuf.clear();
-        self.xbuf.clear();
-
-        // decode index
-        let index = self.ibuf.format(record.index()).as_bytes();
-
-        // write primary fastq to local buffer
-        record.decode_s(&mut self.sbuf)?;
-        if self.quality.len() < self.sbuf.len() {
-            self.quality.resize(self.sbuf.len(), b'?');
-        }
-        let squal = if record.has_quality() {
-            record.squal()
-        } else {
-            &self.quality[..self.sbuf.len()]
-        };
-        write_fastq_parts(&mut self.buffer, index, &self.sbuf, squal)?;
+        self.ctx.fill(&record)?;
+        write_fastq_parts(
+            &mut self.local_writer,
+            self.ctx.sheader(),
+            self.ctx.sbuf(),
+            self.ctx.squal(),
+        )?;
 
         // write extended fastq to local buffer
         if record.is_paired() {
-            record.decode_x(&mut self.xbuf)?;
-            if self.quality.len() < self.xbuf.len() {
-                self.quality.resize(self.xbuf.len(), b'?');
-            }
-            let xqual = if record.has_quality() {
-                record.xqual()
-            } else {
-                &self.quality[..self.xbuf.len()]
-            };
-            write_fastq_parts(&mut self.buffer, index, &self.xbuf, xqual)?;
+            write_fastq_parts(
+                &mut self.local_writer,
+                self.ctx.xheader(),
+                &self.ctx.xbuf(),
+                self.ctx.xqual(),
+            )?;
         }
 
         self.local_count += 1;
@@ -90,18 +70,18 @@ impl ParallelProcessor for Decoder {
     fn on_batch_complete(&mut self) -> binseq::Result<()> {
         // Lock the mutex to write to the global buffer
         {
-            let mut lock = self.global_buffer.lock();
-            lock.write_all(&self.buffer)?;
+            let mut lock = self.global_writer.lock();
+            lock.write_all(&self.local_writer)?;
             lock.flush()?;
         }
         // Lock the mutex to update the number of records
         {
-            let mut num_records = self.num_records.lock();
-            *num_records += self.local_count;
+            let mut global_count = self.global_count.lock();
+            *global_count += self.local_count;
         }
 
         // Clear the local buffer and reset the local record count
-        self.buffer.clear();
+        self.local_writer.clear();
         self.local_count = 0;
         Ok(())
     }

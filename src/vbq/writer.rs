@@ -479,9 +479,9 @@ impl<W: Write> VBinseqWriter<W> {
             let record_size = record_byte_size_quality_header(
                 sbuffer.len(),
                 0,
-                quality.map(|x| x.len()).unwrap_or(0),
+                quality.map_or(0, <[u8]>::len),
                 0,
-                header.map(|x| x.len()).unwrap_or(0),
+                header.map_or(0, <[u8]>::len),
                 0,
                 self.header.flags,
             );
@@ -567,10 +567,10 @@ impl<W: Write> VBinseqWriter<W> {
             let record_size = record_byte_size_quality_header(
                 sbuffer.len(),
                 xbuffer.len(),
-                s_qual.map(|x| x.len()).unwrap_or(0),
-                x_qual.map(|x| x.len()).unwrap_or(0),
-                s_header.map(|x| x.len()).unwrap_or(0),
-                x_header.map(|x| x.len()).unwrap_or(0),
+                s_qual.map_or(0, <[u8]>::len),
+                x_qual.map_or(0, <[u8]>::len),
+                s_header.map_or(0, <[u8]>::len),
+                x_header.map_or(0, <[u8]>::len),
                 self.header.flags,
             );
             if self.cblock.exceeds_block_size(record_size)? {
