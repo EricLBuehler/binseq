@@ -279,7 +279,7 @@ pub enum ExtensionError {
     UnsupportedExtension(String),
 }
 
-/// Trait for converting arbitrary errors into `BinseqError`
+/// Trait for converting arbitrary errors into `Error`
 pub trait IntoBinseqError {
     fn into_binseq_error(self) -> Error;
 }
