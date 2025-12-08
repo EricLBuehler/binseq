@@ -14,7 +14,7 @@
 //!
 //! The reader automatically loads the embedded index from the end of VBQ files:
 //! 1. Seeks to the end of the file to read the index trailer
-//! 2. Validates the INDEX_END_MAGIC marker
+//! 2. Validates the `INDEX_END_MAGIC` marker
 //! 3. Reads the index size and decompresses the embedded index
 //! 4. Uses the index for efficient random access and parallel processing
 //!
@@ -729,9 +729,11 @@ impl<'a> RefRecord<'a> {
 }
 
 impl RefRecord<'_> {
+    #[must_use]
     pub fn shlen(&self) -> u64 {
         self.shlen
     }
+    #[must_use]
     pub fn xhlen(&self) -> u64 {
         self.xhlen
     }
@@ -811,7 +813,7 @@ impl BinseqRecord for RefRecord<'_> {
 ///
 /// The reader automatically loads the embedded index by:
 /// 1. Reading the index trailer from the end of the file
-/// 2. Validating the INDEX_END_MAGIC marker
+/// 2. Validating the `INDEX_END_MAGIC` marker
 /// 3. Decompressing the embedded index data
 /// 4. Using the index for efficient random access and parallel processing
 ///
@@ -1066,7 +1068,7 @@ impl MmapReader {
                     // Expected end of file
                     return Ok(false);
                 }
-                return Err(e.into());
+                return Err(e);
             }
         };
 
@@ -1327,7 +1329,7 @@ impl ParallelReader for MmapReader {
             .iter()
             .filter(|r| {
                 let iv_start = r.cumulative_records as usize;
-                let iv_end = (r.cumulative_records + r.block_records as u64) as usize;
+                let iv_end = (r.cumulative_records + u64::from(r.block_records)) as usize;
                 iv_start < range.end && iv_end > range.start
             })
             .copied()

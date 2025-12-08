@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{BinseqReader, ParallelProcessor, ParallelReader};
+use binseq::{BinseqReader, Context, ParallelProcessor, ParallelReader};
 use memchr::memmem::Finder;
 use parking_lot::Mutex;
 
 #[derive(Clone)]
 pub struct GrepCounter {
     // (thread) local variables
-    sbuf: Vec<u8>,
-    xbuf: Vec<u8>,
+    ctx: Context,
     local_count: usize,
 
     // search pattern (using memchr::memmem::Finder for fast searching)
@@ -22,8 +21,7 @@ impl GrepCounter {
     #[must_use]
     pub fn new(pattern: &[u8]) -> Self {
         Self {
-            sbuf: Vec::new(),
-            xbuf: Vec::new(),
+            ctx: Context::default(),
             pattern: Finder::new(pattern).into_owned(),
             local_count: 0,
             count: Arc::new(Mutex::new(0)),
@@ -34,25 +32,15 @@ impl GrepCounter {
         self.pattern.find(seq).is_some()
     }
 
-    fn clear_buffers(&mut self) {
-        self.sbuf.clear();
-        self.xbuf.clear();
-    }
-
     fn pprint(&self) {
         println!("Matching records: {}", self.count.lock());
     }
 }
 impl ParallelProcessor for GrepCounter {
     fn process_record<R: binseq::BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
-        self.clear_buffers();
+        self.ctx.fill_sequences(&record)?;
 
-        record.decode_s(&mut self.sbuf)?;
-        if record.is_paired() {
-            record.decode_x(&mut self.xbuf)?;
-        }
-
-        if self.match_sequence(&self.sbuf) || self.match_sequence(&self.xbuf) {
+        if self.match_sequence(&self.ctx.sbuf()) || self.match_sequence(&self.ctx.xbuf()) {
             self.local_count += 1;
         }
 
