@@ -19,9 +19,20 @@ impl Context {
     pub fn sbuf(&self) -> &[u8] {
         &self.sbuf
     }
+
+    /// Mutable reference to primary sequence data
+    pub fn sbuf_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.sbuf
+    }
+
     /// Buffer for extended sequence data
     pub fn xbuf(&self) -> &[u8] {
         &self.xbuf
+    }
+
+    /// Mutable reference to extended sequence data
+    pub fn xbuf_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.xbuf
     }
 
     /// Buffer for primary sequence header
@@ -29,9 +40,19 @@ impl Context {
         &self.sheader
     }
 
+    /// Mutable reference to primary sequence header
+    pub fn sheader_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.sheader
+    }
+
     /// Buffer for extended sequence header
     pub fn xheader(&self) -> &[u8] {
         &self.xheader
+    }
+
+    /// Mutable reference to extended sequence header
+    pub fn xheader_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.xheader
     }
 
     /// Buffer for primary sequence quality scores
@@ -39,9 +60,19 @@ impl Context {
         &self.squal
     }
 
+    /// Mutable reference to primary sequence quality scores
+    pub fn squal_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.squal
+    }
+
     /// Buffer for extended sequence quality scores
     pub fn xqual(&self) -> &[u8] {
         &self.xqual
+    }
+
+    /// Mutable reference to extended sequence quality scores
+    pub fn xqual_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.xqual
     }
 
     /// Clear all buffers
