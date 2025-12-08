@@ -10,7 +10,7 @@ use std::{
 use anyhow::{bail, Result};
 use binseq::{
     bq::{self, BinseqHeaderBuilder},
-    BinseqReader, BinseqRecord, ParallelProcessor, ParallelReader,
+    BinseqReader, BinseqRecord, Context, ParallelProcessor, ParallelReader,
 };
 use nucgen::Sequence;
 
@@ -18,8 +18,7 @@ use nucgen::Sequence;
 pub struct MyProcessor {
     local_counter: usize,
     counter: Arc<AtomicUsize>,
-    sbuf: Vec<u8>,
-    xbuf: Vec<u8>,
+    ctx: Context,
 }
 impl MyProcessor {
     #[must_use]
@@ -29,12 +28,7 @@ impl MyProcessor {
 }
 impl ParallelProcessor for MyProcessor {
     fn process_record<R: BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
-        self.sbuf.clear();
-        self.xbuf.clear();
-        record.decode_s(&mut self.sbuf)?;
-        if record.is_paired() {
-            record.decode_x(&mut self.xbuf)?;
-        }
+        self.ctx.fill_sequences(&record)?;
         self.local_counter += 1;
         Ok(())
     }
