@@ -371,7 +371,7 @@ impl<W: Write> BinseqWriter<W> {
             if has_flag {
                 write_flag(&mut self.inner, flag.unwrap_or(0))?;
             }
-            write_buffer(&mut self.inner, &sbuffer)?;
+            write_buffer(&mut self.inner, sbuffer)?;
             Ok(true)
         } else {
             Ok(false)

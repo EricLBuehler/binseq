@@ -16,6 +16,7 @@ pub struct Context {
 }
 impl Context {
     /// Buffer for primary sequence data
+    #[must_use]
     pub fn sbuf(&self) -> &[u8] {
         &self.sbuf
     }
@@ -26,6 +27,7 @@ impl Context {
     }
 
     /// Buffer for extended sequence data
+    #[must_use]
     pub fn xbuf(&self) -> &[u8] {
         &self.xbuf
     }
@@ -36,6 +38,7 @@ impl Context {
     }
 
     /// Buffer for primary sequence header
+    #[must_use]
     pub fn sheader(&self) -> &[u8] {
         &self.sheader
     }
@@ -46,6 +49,7 @@ impl Context {
     }
 
     /// Buffer for extended sequence header
+    #[must_use]
     pub fn xheader(&self) -> &[u8] {
         &self.xheader
     }
@@ -56,6 +60,7 @@ impl Context {
     }
 
     /// Buffer for primary sequence quality scores
+    #[must_use]
     pub fn squal(&self) -> &[u8] {
         &self.squal
     }
@@ -66,6 +71,7 @@ impl Context {
     }
 
     /// Buffer for extended sequence quality scores
+    #[must_use]
     pub fn xqual(&self) -> &[u8] {
         &self.xqual
     }
@@ -118,7 +124,7 @@ impl Context {
         Ok(())
     }
 
-    /// Fill the context with all data from a BinseqRecord.
+    /// Fill the context with all data from a `BinseqRecord`.
     ///
     /// Note: Clears the context before filling it with data.
     pub fn fill<R: BinseqRecord>(&mut self, record: R) -> Result<()> {
