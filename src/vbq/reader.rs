@@ -306,9 +306,7 @@ impl RecordBlock {
         // Reuse the decompression context - avoids allocation!
         self.dctx
             .decompress(&mut self.rbuf, bytes)
-            .map_err(|code| {
-                std::io::Error::other(zstd_safe::get_error_name(code))
-            })?;
+            .map_err(|code| std::io::Error::other(zstd_safe::get_error_name(code)))?;
 
         if self.rbuf.len() != self.block_size {
             return Err(ReadError::PartialRecord(self.rbuf.len()).into());
