@@ -92,6 +92,46 @@ fn encoded_sequence_len(len: u64, bitsize: BitSize) -> usize {
     }
 }
 
+/// Represents a span (offset, length) into a buffer
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Span {
+    offset: usize,
+    len: usize,
+}
+impl Span {
+    fn new(offset: usize, len: usize) -> Self {
+        Self { offset, len }
+    }
+
+    /// Get a slice of bytes from a buffer
+    fn slice<'a>(&self, buffer: &'a [u8]) -> &'a [u8] {
+        &buffer[self.offset..self.offset + self.len]
+    }
+
+    /// Get a slice of u64s from a buffer
+    fn slice_u64<'a>(&self, buffer: &'a [u64]) -> &'a [u64] {
+        &buffer[self.offset..self.offset + self.len]
+    }
+}
+
+/// Metadata for a single record, storing spans into rbuf
+#[derive(Debug, Clone, Copy)]
+struct RecordMetadata {
+    flag: Option<u64>,
+    slen: u64,
+    xlen: u64,
+
+    // Spans for primary sequence
+    s_seq_span: Span,    // Encoded sequence words (u64s) (into `.sequences` buffer)
+    s_qual_span: Span,   // Quality bytes
+    s_header_span: Span, // Header bytes
+
+    // Spans for extended sequence
+    x_seq_span: Span,    // Encoded sequence words (u64s) (into `.sequences` buffer)
+    x_qual_span: Span,   // Quality bytes
+    x_header_span: Span, // Header bytes
+}
+
 /// A container for a block of VBINSEQ records
 ///
 /// The `RecordBlock` struct represents a single block of records read from a VBINSEQ file.
@@ -124,36 +164,19 @@ pub struct RecordBlock {
     /// This allows records to maintain their global position in the file
     index: usize,
 
-    /// Buffer containing all record flags in the block
-    /// Each record has one flag value stored at the corresponding position
-    flags: Vec<Option<u64>>,
+    /// Reusable buffer for temporary storage during decompression
+    /// Using a reusable buffer reduces memory allocations
+    rbuf: Vec<u8>,
 
-    /// Buffer containing all sequence lengths in the block
-    /// For each record, two consecutive entries are stored: primary sequence length and extended sequence length
-    lens: Vec<u64>,
-
-    /// Buffer containing all header lengths in the block
-    /// For each record, two consecutive entries are stored: primary header length and extended header length
-    header_lengths: Vec<u64>,
-
-    /// Buffer containing all packed nucleotide sequences in the block
-    /// Nucleotides are encoded as 2-bit values (4 nucleotides per byte)
+    /// Sequence data (u64s) - small copy during parsing
     sequences: Vec<u64>,
 
-    /// Buffer containing all quality scores in the block
-    /// Quality scores are stored as raw bytes, one byte per nucleotide
-    qualities: Vec<u8>,
-
-    /// Buffer containing all headers in the block
-    headers: Vec<u8>,
+    /// Record metadata stored as compact spans
+    records: Vec<RecordMetadata>,
 
     /// Maximum size of the block in bytes
     /// This is derived from the file header's block size field
     block_size: usize,
-
-    /// Reusable buffer for temporary storage during decompression
-    /// Using a reusable buffer reduces memory allocations
-    rbuf: Vec<u8>,
 
     /// Reusable zstd decompression context
     dctx: zstd_safe::DCtx<'static>,
@@ -178,14 +201,10 @@ impl RecordBlock {
         Self {
             bitsize,
             index: 0,
-            flags: Vec::new(),
-            lens: Vec::new(),
-            header_lengths: Vec::new(),
-            sequences: Vec::new(),
-            qualities: Vec::new(),
-            headers: Vec::new(),
             block_size,
-            rbuf: Vec::new(),
+            records: Vec::default(),
+            sequences: Vec::default(),
+            rbuf: Vec::default(),
             dctx: zstd_safe::DCtx::create(),
         }
     }
@@ -197,7 +216,7 @@ impl RecordBlock {
     /// The number of records currently stored in this block
     #[must_use]
     pub fn n_records(&self) -> usize {
-        self.flags.len()
+        self.records.len()
     }
 
     /// Returns an iterator over the records in this block
@@ -249,12 +268,9 @@ impl RecordBlock {
     /// from a file.
     pub fn clear(&mut self) {
         self.index = 0;
-        self.flags.clear();
-        self.lens.clear();
-        self.header_lengths.clear();
+        self.records.clear();
         self.sequences.clear();
-        self.qualities.clear();
-        self.headers.clear();
+        // Note: We keep rbuf allocated for reuse
     }
 
     /// Ingest the bytes from a block into the record block
@@ -271,19 +287,9 @@ impl RecordBlock {
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
     /// * `has_header` - A boolean indicating whether the block contains headers
     fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
-        ingest_bytes(
-            bytes,
-            &mut self.flags,
-            &mut self.lens,
-            &mut self.sequences,
-            &mut self.qualities,
-            &mut self.header_lengths,
-            &mut self.headers,
-            has_quality,
-            has_header,
-            has_flags,
-            self.bitsize,
-        );
+        self.rbuf.clear();
+        self.rbuf.extend_from_slice(bytes);
+        self.parse_records(has_quality, has_header, has_flags);
     }
 
     /// Decompresses the given bytes and ingests them into the record block.
@@ -309,391 +315,184 @@ impl RecordBlock {
             return Err(ReadError::PartialRecord(self.rbuf.len()).into());
         }
 
-        ingest_bytes(
-            &self.rbuf,
-            &mut self.flags,
-            &mut self.lens,
-            &mut self.sequences,
-            &mut self.qualities,
-            &mut self.header_lengths,
-            &mut self.headers,
-            has_quality,
-            has_header,
-            has_flags,
-            self.bitsize,
-        );
+        self.parse_records(has_quality, has_header, has_flags);
         Ok(())
     }
-}
+    /// Parse records from rbuf, storing spans for all data
+    fn parse_records(&mut self, has_quality: bool, has_header: bool, has_flags: bool) {
+        self.records.clear();
+        self.sequences.clear();
 
-/// Ingest the bytes from a block into the record block
-///
-/// This method takes a slice of bytes and processes it to extract
-/// the records from the block. It is used when reading a block from
-/// a file into a record block.
-///
-/// This is a private method used primarily for parallel processing.
-///
-/// # Parameters
-///
-/// * `bytes` - A slice of bytes containing the block data
-/// * `has_quality` - A boolean indicating whether the block contains quality scores
-/// * `has_header` - A boolean indicating whether the block contains headers
-///
-/// # Returns
-///
-/// A `Result` indicating success or an error
-fn ingest_bytes(
-    bytes: &[u8],
-    flags: &mut Vec<Option<u64>>,
-    lens: &mut Vec<u64>,
-    sequences: &mut Vec<u64>,
-    qualities: &mut Vec<u8>,
-    header_lengths: &mut Vec<u64>,
-    headers: &mut Vec<u8>,
-    has_quality: bool,
-    has_header: bool,
-    has_flags: bool,
-    bitsize: BitSize,
-) {
-    let mut pos = 0;
-    loop {
-        // Read the flag and advance the position
-        let flag = if has_flags {
-            if pos + 24 > bytes.len() {
+        let mut pos = 0;
+        let bytes = &self.rbuf;
+
+        loop {
+            // Check if we have enough bytes for the minimum record header
+            let min_header_size = if has_flags { 24 } else { 16 };
+            if pos + min_header_size > bytes.len() {
                 break;
             }
-            let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+
+            // Read flag
+            let flag = if has_flags {
+                let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                pos += 8;
+                Some(flag)
+            } else {
+                None
+            };
+
+            // Read lengths
+            let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
             pos += 8;
-            Some(flag)
-        } else {
-            if pos + 16 > bytes.len() {
+            let xlen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+            pos += 8;
+
+            // Check for end of records
+            if slen == 0 {
                 break;
             }
-            None
-        };
 
-        // Read the primary length and advance the position
-        let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-        pos += 8;
+            // Calculate sizes
+            let s_seq_words = encoded_sequence_len(slen, self.bitsize);
+            let x_seq_words = encoded_sequence_len(xlen, self.bitsize);
 
-        // Read the extended length and advance the position
-        let xlen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-        pos += 8;
+            // Primary sequence - store span into sequences Vec
+            let s_seq_span = Span::new(self.sequences.len(), s_seq_words);
+            for _ in 0..s_seq_words {
+                let val = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.sequences.push(val);
+                pos += 8;
+            }
 
-        // No more records in the block
-        if slen == 0 {
-            // It is possible to end up here if the block is not full
-            // In this case the flag and the length are both zero
-            // and effectively blank but initialized memory.
-            break;
-        }
+            // Primary quality - store span into rbuf
+            let s_qual_span = if has_quality {
+                let span = Span::new(pos, slen as usize);
+                pos += slen as usize;
+                span
+            } else {
+                Span::new(0, 0)
+            };
 
-        // Add the record to the block
-        flags.push(flag);
-        lens.push(slen);
-        lens.push(xlen);
+            // Primary header - store span into rbuf
+            let s_header_span = if has_header {
+                let header_len = LittleEndian::read_u64(&bytes[pos..pos + 8]) as usize;
+                pos += 8;
+                let span = Span::new(pos, header_len);
+                pos += header_len;
+                span
+            } else {
+                Span::new(0, 0)
+            };
 
-        // Add the primary sequence to the block
-        let mut seq = [0u8; 8];
-        for _ in 0..encoded_sequence_len(slen, bitsize) {
-            seq.copy_from_slice(&bytes[pos..pos + 8]);
-            sequences.push(LittleEndian::read_u64(&seq));
-            pos += 8;
-        }
+            // Extended sequence - store span into sequences Vec
+            let x_seq_span = Span::new(self.sequences.len(), x_seq_words);
+            for _ in 0..x_seq_words {
+                let val = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+                self.sequences.push(val);
+                pos += 8;
+            }
 
-        // Add the primary quality score to the block
-        if has_quality {
-            let qual_buffer = &bytes[pos..pos + slen as usize];
-            qualities.extend_from_slice(qual_buffer);
-            pos += slen as usize;
-        }
+            // Extended quality - store span into rbuf
+            let x_qual_span = if has_quality {
+                let span = Span::new(pos, xlen as usize);
+                pos += xlen as usize;
+                span
+            } else {
+                Span::new(0, 0)
+            };
 
-        // Add the primary header to the block
-        if has_header {
-            let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            header_lengths.push(s_header_length);
-            pos += 8; // Fixed: advance by 8 bytes for u64
+            // Extended header - store span into rbuf
+            let x_header_span = if has_header && xlen > 0 {
+                let header_len = LittleEndian::read_u64(&bytes[pos..pos + 8]) as usize;
+                pos += 8;
+                let span = Span::new(pos, header_len);
+                pos += header_len;
+                span
+            } else {
+                Span::new(0, 0)
+            };
 
-            let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
-            headers.extend_from_slice(s_header_buffer);
-            pos += s_header_length as usize;
-        }
-
-        // Add the extended sequence to the block
-        for _ in 0..encoded_sequence_len(xlen, bitsize) {
-            seq.copy_from_slice(&bytes[pos..pos + 8]);
-            sequences.push(LittleEndian::read_u64(&seq));
-            pos += 8;
-        }
-
-        // Add the extended quality score to the block
-        if has_quality {
-            let qual_buffer = &bytes[pos..pos + xlen as usize];
-            qualities.extend_from_slice(qual_buffer);
-            pos += xlen as usize;
-        }
-
-        // Add the extended header to the block
-        if has_header && xlen > 0 {
-            let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            header_lengths.push(x_header_length);
-            pos += 8; // Fixed: advance by 8 bytes for u64
-
-            let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
-            headers.extend_from_slice(x_header_buffer);
-            pos += x_header_length as usize;
+            // Store the record metadata - all spans!
+            self.records.push(RecordMetadata {
+                flag,
+                slen,
+                xlen,
+                s_seq_span,
+                x_seq_span,
+                s_qual_span,
+                s_header_span,
+                x_qual_span,
+                x_header_span,
+            });
         }
     }
 }
 
 pub struct RecordBlockIter<'a> {
     block: &'a RecordBlock,
-    /// Record position in the block
-    rpos: usize,
-    /// Encoded sequence position in the block
-    epos: usize,
-    /// Header position in the block
-    hpos: usize,
-    /// Quality position in the block
-    qpos: usize,
+    pos: usize,
 }
 impl<'a> RecordBlockIter<'a> {
     #[must_use]
     pub fn new(block: &'a RecordBlock) -> Self {
-        Self {
-            block,
-            rpos: 0,
-            epos: 0,
-            hpos: 0,
-            qpos: 0,
-        }
+        Self { block, pos: 0 }
     }
 }
 impl<'a> Iterator for RecordBlockIter<'a> {
     type Item = RefRecord<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.rpos == self.block.n_records() {
+        if self.pos >= self.block.records.len() {
             return None;
         }
 
-        let index = (self.block.index + self.rpos) as u64;
-        let flag = self.block.flags[self.rpos];
-        let slen = self.block.lens[2 * self.rpos];
-        let xlen = self.block.lens[(2 * self.rpos) + 1];
-        let schunk = encoded_sequence_len(slen, self.block.bitsize);
-        let xchunk = encoded_sequence_len(xlen, self.block.bitsize);
+        let meta = &self.block.records[self.pos];
+        let index = (self.block.index + self.pos) as u64;
+        self.pos += 1;
 
-        // Handle sequences
-        let s_seq = &self.block.sequences[self.epos..self.epos + schunk];
-        self.epos += schunk;
-
-        let x_seq = &self.block.sequences[self.epos..self.epos + xchunk];
-        self.epos += xchunk;
-
-        // Handle quality scores (separate position tracking)
-        let s_qual = if self.block.qualities.is_empty() {
-            &[]
-        } else {
-            let qual = &self.block.qualities[self.qpos..self.qpos + slen as usize];
-            self.qpos += slen as usize;
-            qual
-        };
-
-        let x_qual = if self.block.qualities.is_empty() {
-            &[]
-        } else {
-            let qual = &self.block.qualities[self.qpos..self.qpos + xlen as usize];
-            self.qpos += xlen as usize;
-            qual
-        };
-
-        // Handle headers (separate position tracking)
-        let header_idx = if xlen > 0 { 2 * self.rpos } else { self.rpos };
-        let mut shlen = 0;
-        let s_header = if self.block.headers.is_empty() {
-            &[]
-        } else {
-            // Get header length
-            shlen = self.block.header_lengths[header_idx];
-
-            // Extract header data
-            let header = &self.block.headers[self.hpos..self.hpos + shlen as usize];
-            self.hpos += shlen as usize;
-            header
-        };
-
-        let mut xhlen = 0;
-        let x_header = if self.block.headers.is_empty() || xlen == 0 {
-            &[]
-        } else {
-            xhlen = self.block.header_lengths[header_idx + 1];
-            let header = &self.block.headers[self.hpos..self.hpos + xhlen as usize];
-            self.hpos += xhlen as usize;
-            header
-        };
-
-        // update record position
-        self.rpos += 1;
-
-        Some(RefRecord::new(
-            self.block.bitsize,
+        Some(RefRecord {
+            bitsize: self.block.bitsize,
             index,
-            flag,
-            slen,
-            xlen,
-            s_seq,
-            x_seq,
-            s_qual,
-            x_qual,
-            shlen,
-            s_header,
-            xhlen,
-            x_header,
-        ))
+            flag: meta.flag,
+            slen: meta.slen,
+            xlen: meta.xlen,
+            // Slice into sequences Vec using span
+            sbuf: meta.s_seq_span.slice_u64(&self.block.sequences),
+            xbuf: meta.x_seq_span.slice_u64(&self.block.sequences),
+            // Slice into rbuf using span
+            squal: meta.s_qual_span.slice(&self.block.rbuf),
+            xqual: meta.x_qual_span.slice(&self.block.rbuf),
+            sheader: meta.s_header_span.slice(&self.block.rbuf),
+            xheader: meta.x_header_span.slice(&self.block.rbuf),
+        })
     }
 }
 
-/// A reference to a record in a VBINSEQ file
-///
-/// `RefRecord` provides a lightweight view into a record within a `RecordBlock`.
-/// It holds references to the underlying data rather than owning it, making it
-/// efficient to iterate through records without copying data.
-///
-/// Each record contains a primary sequence (accessible via `sbuf` and related methods)
-/// and optionally a paired/extended sequence (accessible via `xbuf` and related methods).
-/// Both sequences may also have associated quality scores.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use binseq::vbq::MmapReader;
-/// use binseq::BinseqRecord;
-///
-/// let mut reader = MmapReader::new("example.vbq").unwrap();
-/// let mut block = reader.new_block();
-/// reader.read_block_into(&mut block).unwrap();
-///
-/// let mut sequence = Vec::new();
-///
-/// for record in block.iter() {
-///     // Get record metadata
-///     println!("Record {}, flag: {:?}", record.index(), record.flag());
-///
-///     // Decode the primary sequence
-///     record.decode_s(&mut sequence).unwrap();
-///     println!("Sequence: {}", std::str::from_utf8(&sequence).unwrap());
-///     sequence.clear();
-///
-///     // If this is a paired record, decode the paired sequence
-///     if record.is_paired() {
-///         record.decode_x(&mut sequence).unwrap();
-///         println!("Paired sequence: {}", std::str::from_utf8(&sequence).unwrap());
-///         sequence.clear();
-///     }
-///
-///     // Access quality scores if available
-///     if record.has_quality() {
-///         println!("Quality scores available");
-///     }
-/// }
-/// ```
+/// Zero-copy record reference
 pub struct RefRecord<'a> {
-    /// Bitsize of the record
     bitsize: BitSize,
-
-    /// Global index of this record within the file
     index: u64,
-
-    /// Flag value for this record (can be used for custom metadata)
     flag: Option<u64>,
-
-    /// Length of the primary sequence in nucleotides
     slen: u64,
-
-    /// Length of the extended/paired sequence in nucleotides (0 if not paired)
     xlen: u64,
-
-    /// Buffer containing the encoded primary nucleotide sequence
     sbuf: &'a [u64],
-
-    /// Buffer containing the encoded extended/paired nucleotide sequence
     xbuf: &'a [u64],
-
-    /// Quality scores for the primary sequence (empty if quality scores not present)
     squal: &'a [u8],
-
-    /// Quality scores for the extended/paired sequence (empty if not paired or no quality)
     xqual: &'a [u8],
-
-    /// Length of the header for the primary sequence in bytes
-    shlen: u64,
-
-    /// Header for the record
     sheader: &'a [u8],
-
-    /// Length of the header for the extended/paired sequence in bytes
-    xhlen: u64,
-
-    /// Header for the extended/paired sequence (empty if not paired)
     xheader: &'a [u8],
 }
-impl<'a> RefRecord<'a> {
-    #[allow(clippy::too_many_arguments)]
-    #[must_use]
-    pub fn new(
-        bitsize: BitSize,
-        index: u64,
-        flag: Option<u64>,
-        slen: u64,
-        xlen: u64,
-        sbuf: &'a [u64],
-        xbuf: &'a [u64],
-        squal: &'a [u8],
-        xqual: &'a [u8],
-        shlen: u64,
-        sheader: &'a [u8],
-        xhlen: u64,
-        xheader: &'a [u8],
-    ) -> Self {
-        Self {
-            bitsize,
-            index,
-            flag,
-            slen,
-            xlen,
-            sbuf,
-            xbuf,
-            squal,
-            xqual,
-            shlen,
-            sheader,
-            xhlen,
-            xheader,
-        }
-    }
-}
 
-impl RefRecord<'_> {
-    #[must_use]
-    pub fn shlen(&self) -> u64 {
-        self.shlen
-    }
-    #[must_use]
-    pub fn xhlen(&self) -> u64 {
-        self.xhlen
-    }
-}
-
-impl BinseqRecord for RefRecord<'_> {
+impl<'a> BinseqRecord for RefRecord<'a> {
     fn bitsize(&self) -> BitSize {
         self.bitsize
     }
+
     fn index(&self) -> u64 {
         self.index
     }
-    /// Clear the buffer and fill it with the sequence header
+
     fn sheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
         if self.sheader.is_empty() {
@@ -702,33 +501,40 @@ impl BinseqRecord for RefRecord<'_> {
             buffer.extend_from_slice(self.sheader);
         }
     }
-    /// Clear the buffer and fill it with the sequence header
+
     fn xheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
-        if self.sheader.is_empty() {
+        if self.xheader.is_empty() {
             buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
         } else {
             buffer.extend_from_slice(self.xheader);
         }
     }
+
     fn flag(&self) -> Option<u64> {
         self.flag
     }
+
     fn slen(&self) -> u64 {
         self.slen
     }
+
     fn xlen(&self) -> u64 {
         self.xlen
     }
+
     fn sbuf(&self) -> &[u64] {
         self.sbuf
     }
+
     fn xbuf(&self) -> &[u64] {
         self.xbuf
     }
+
     fn squal(&self) -> &[u8] {
         self.squal
     }
+
     fn xqual(&self) -> &[u8] {
         self.xqual
     }
