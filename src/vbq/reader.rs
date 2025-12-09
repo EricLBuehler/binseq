@@ -286,10 +286,20 @@ impl RecordBlock {
     /// * `bytes` - A slice of bytes containing the block data
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
     /// * `has_header` - A boolean indicating whether the block contains headers
-    fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
+    fn ingest_bytes(
+        &mut self,
+        bytes: &[u8],
+        has_quality: bool,
+        has_header: bool,
+        has_flags: bool,
+    ) -> Result<()> {
+        if bytes.len() != self.block_size {
+            return Err(ReadError::PartialRecord(bytes.len()).into());
+        }
         self.rbuf.clear();
         self.rbuf.extend_from_slice(bytes);
         self.parse_records(has_quality, has_header, has_flags);
+        Ok(())
     }
 
     /// Decompresses the given bytes and ingests them into the record block.
@@ -307,12 +317,13 @@ impl RecordBlock {
         }
 
         // Reuse the decompression context - avoids allocation!
-        self.dctx
+        let bytes_read = self
+            .dctx
             .decompress(&mut self.rbuf, bytes)
             .map_err(|code| std::io::Error::other(zstd_safe::get_error_name(code)))?;
 
-        if self.rbuf.len() != self.block_size {
-            return Err(ReadError::PartialRecord(self.rbuf.len()).into());
+        if bytes_read != self.block_size {
+            return Err(ReadError::PartialRecord(bytes_read).into());
         }
 
         self.parse_records(has_quality, has_header, has_flags);
@@ -850,7 +861,7 @@ impl MmapReader {
                 self.header.qual,
                 self.header.headers,
                 self.header.flags,
-            );
+            )?;
         }
 
         // Update the block index
@@ -1149,7 +1160,7 @@ impl ParallelReader for MmapReader {
                             header.qual,
                             header.headers,
                             header.flags,
-                        );
+                        )?;
                     }
 
                     // Update the record block index
