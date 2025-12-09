@@ -3,7 +3,7 @@ use std::io::{stdout, BufWriter, Write};
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{context::FullCtx, prelude::*};
+use binseq::prelude::*;
 
 use parking_lot::Mutex;
 
@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 #[derive(Clone)]
 pub struct Decoder {
     /// Reusable context
-    ctx: FullCtx,
+    ctx: Ctx,
 
     /// local output buffer
     local_writer: Vec<u8>,
@@ -32,7 +32,7 @@ impl Decoder {
         let global_writer = Arc::new(Mutex::new(writer));
         Decoder {
             local_writer: Vec::new(),
-            ctx: FullCtx::default(),
+            ctx: Ctx::default(),
             local_count: 0,
             global_writer,
             global_count: Arc::new(Mutex::new(0)),

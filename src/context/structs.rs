@@ -2,7 +2,7 @@ use super::traits::{Context, HeaderContext, QualityContext, SequenceContext};
 use crate::{BinseqRecord, Result};
 
 #[derive(Clone, Default)]
-pub struct FullCtx {
+pub struct Ctx {
     sbuf: Vec<u8>,
     xbuf: Vec<u8>,
     sheader: Vec<u8>,
@@ -10,7 +10,7 @@ pub struct FullCtx {
     squal: Vec<u8>,
     xqual: Vec<u8>,
 }
-impl SequenceContext for FullCtx {
+impl SequenceContext for Ctx {
     #[inline]
     fn sbuf(&self) -> &[u8] {
         &self.sbuf
@@ -28,7 +28,7 @@ impl SequenceContext for FullCtx {
         &mut self.xbuf
     }
 }
-impl QualityContext for FullCtx {
+impl QualityContext for Ctx {
     #[inline]
     fn squal(&self) -> &[u8] {
         &self.squal
@@ -46,7 +46,7 @@ impl QualityContext for FullCtx {
         &mut self.xqual
     }
 }
-impl HeaderContext for FullCtx {
+impl HeaderContext for Ctx {
     #[inline]
     fn sheader(&self) -> &[u8] {
         &self.sheader
@@ -64,7 +64,7 @@ impl HeaderContext for FullCtx {
         &mut self.xheader
     }
 }
-impl Context for FullCtx {
+impl Context for Ctx {
     #[inline]
     fn fill<R: BinseqRecord>(&mut self, record: &R) -> Result<()> {
         self.fill_sequences(record)?;
