@@ -2,6 +2,7 @@ use crate::{BinseqRecord, Result};
 
 pub const DEFAULT_QUALITY: u8 = b'?';
 
+/// Trait for handling reusable buffers in decoding BINSEQ records.
 pub trait Context: Clone + Default {
     /// Replaces the contents of the context with the contents of the given record.
     ///
@@ -9,6 +10,7 @@ pub trait Context: Clone + Default {
     fn fill<R: BinseqRecord>(&mut self, record: &R) -> Result<()>;
 }
 
+/// Trait for handling reusable buffers in decoding BINSEQ records focused on nucleotide sequences.
 pub trait SequenceContext {
     fn sbuf(&self) -> &[u8];
     fn xbuf(&self) -> &[u8];
@@ -30,6 +32,7 @@ pub trait SequenceContext {
     }
 }
 
+/// Trait for handling reusable buffers in decoding BINSEQ records focused on quality data.
 pub trait QualityContext {
     fn squal(&self) -> &[u8];
     fn xqual(&self) -> &[u8];
@@ -88,6 +91,7 @@ pub trait QualityContext {
     }
 }
 
+/// Trait for handling reusable buffers in decoding BINSEQ records focused on header data.
 pub trait HeaderContext {
     fn sheader(&self) -> &[u8];
     fn sheader_mut(&mut self) -> &mut Vec<u8>;

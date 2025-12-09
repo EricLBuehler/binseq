@@ -1,6 +1,9 @@
 use super::traits::{Context, HeaderContext, QualityContext, SequenceContext};
 use crate::{BinseqRecord, Result};
 
+/// Context for sequence data
+///
+/// Has all the necessary fields for storing sequence data.
 #[derive(Clone, Default)]
 pub struct Ctx {
     sbuf: Vec<u8>,
@@ -74,6 +77,9 @@ impl Context for Ctx {
     }
 }
 
+/// Context for just sequence data
+///
+/// Only stores nucleotide sequence data.
 #[derive(Clone, Default)]
 pub struct SeqCtx {
     sbuf: Vec<u8>,
@@ -104,6 +110,9 @@ impl Context for SeqCtx {
     }
 }
 
+/// Context for sequence data and headers
+///
+/// Does not store quality data.
 #[derive(Clone, Default)]
 pub struct SeqHeaderCtx {
     sbuf: Vec<u8>,
@@ -156,6 +165,9 @@ impl Context for SeqHeaderCtx {
     }
 }
 
+/// Context for sequence data and quality data
+///
+/// Does not store header data.
 #[derive(Clone, Default)]
 pub struct SeqQualCtx {
     sbuf: Vec<u8>,
