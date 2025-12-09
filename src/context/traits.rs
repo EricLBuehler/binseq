@@ -72,15 +72,15 @@ pub trait QualityContext {
         let xlen = record.xlen() as usize;
 
         // only resize if its not the right size
-        if self.squal().len() < slen {
-            self.squal_mut().clear();
-            self.squal_mut().resize(slen, DEFAULT_QUALITY);
+        let squal = self.squal_mut();
+        if squal.len() != slen {
+            squal.resize(slen, DEFAULT_QUALITY);
         }
 
         // Only resize if there's an extended sequence and it's not already the right size
-        if xlen > 0 && self.xqual().len() < xlen {
-            self.xqual_mut().clear();
-            self.xqual_mut().resize(xlen, DEFAULT_QUALITY);
+        let xqual = self.xqual_mut();
+        if xqual.len() != xlen {
+            xqual.resize(xlen, DEFAULT_QUALITY);
         }
     }
 }
