@@ -63,7 +63,7 @@ use bitnuc::BitSize;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use zstd::Encoder as ZstdEncoder;
+use zstd::stream::copy_encode;
 
 use super::header::{BlockHeader, VBinseqHeader};
 use crate::error::{Result, WriteError};
@@ -942,9 +942,7 @@ impl BlockWriter {
 
     fn flush_compressed<W: Write>(&mut self, inner: &mut W) -> Result<BlockHeader> {
         // Encode the block
-        let mut encoder = ZstdEncoder::new(&mut self.zbuf, self.level)?;
-        encoder.write_all(&self.ubuf)?;
-        encoder.finish()?;
+        copy_encode(self.ubuf.as_slice(), &mut self.zbuf, self.level)?;
 
         // Build a block header (this is variably sized in the compressed case)
         let header = BlockHeader::new(self.zbuf.len() as u64, self.starts.len() as u32);
