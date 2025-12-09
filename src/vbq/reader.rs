@@ -61,6 +61,7 @@ use std::sync::Arc;
 use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
+use zstd::zstd_safe;
 
 use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
@@ -153,6 +154,9 @@ pub struct RecordBlock {
     /// Reusable buffer for temporary storage during decompression
     /// Using a reusable buffer reduces memory allocations
     rbuf: Vec<u8>,
+
+    /// Reusable zstd decompression context
+    dctx: zstd_safe::DCtx<'static>,
 }
 impl RecordBlock {
     /// Creates a new empty `RecordBlock` with the specified block size
@@ -182,6 +186,7 @@ impl RecordBlock {
             headers: Vec::new(),
             block_size,
             rbuf: Vec::new(),
+            dctx: zstd_safe::DCtx::create(),
         }
     }
 
@@ -292,12 +297,23 @@ impl RecordBlock {
         has_header: bool,
         has_flags: bool,
     ) -> Result<()> {
-        // Decompress entire block at once into reusable buffer
+        // Clear and ensure capacity
         self.rbuf.clear();
-        zstd::stream::copy_decode(bytes, &mut self.rbuf)?;
+        if self.rbuf.capacity() < self.block_size {
+            self.rbuf.reserve(self.block_size - self.rbuf.capacity());
+        }
+
+        // Reuse the decompression context - avoids allocation!
+        self.dctx
+            .decompress(&mut self.rbuf, bytes)
+            .map_err(|code| {
+                std::io::Error::new(std::io::ErrorKind::Other, zstd_safe::get_error_name(code))
+            })?;
+
         if self.rbuf.len() != self.block_size {
             return Err(ReadError::PartialRecord(self.rbuf.len()).into());
         }
+
         ingest_bytes(
             &self.rbuf,
             &mut self.flags,
