@@ -746,6 +746,7 @@ impl BinseqRecord for RefRecord<'_> {
     fn index(&self) -> u64 {
         self.index
     }
+    /// Clear the buffer and fill it with the sequence header
     fn sheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
         if self.sheader.is_empty() {
@@ -754,6 +755,7 @@ impl BinseqRecord for RefRecord<'_> {
             buffer.extend_from_slice(self.sheader);
         }
     }
+    /// Clear the buffer and fill it with the sequence header
     fn xheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
         if self.sheader.is_empty() {

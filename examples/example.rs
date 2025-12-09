@@ -3,14 +3,15 @@ use std::io::{stdout, BufWriter, Write};
 use std::sync::Arc;
 
 use anyhow::Result;
-use binseq::{BinseqReader, BinseqRecord, Context, ParallelProcessor, ParallelReader};
+use binseq::prelude::*;
+
 use parking_lot::Mutex;
 
 /// A struct for decoding BINSEQ data back to FASTQ format.
 #[derive(Clone)]
 pub struct Decoder {
     /// Reusable context
-    ctx: Context,
+    ctx: Ctx,
 
     /// local output buffer
     local_writer: Vec<u8>,
@@ -31,7 +32,7 @@ impl Decoder {
         let global_writer = Arc::new(Mutex::new(writer));
         Decoder {
             local_writer: Vec::new(),
-            ctx: Context::default(),
+            ctx: Ctx::default(),
             local_count: 0,
             global_writer,
             global_count: Arc::new(Mutex::new(0)),

@@ -75,10 +75,13 @@ impl BinseqRecord for RefRecord<'_> {
     fn index(&self) -> u64 {
         self.id
     }
+    /// Clear the buffer and fill it with the sequence header
     fn sheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
         buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
     }
+
+    /// Clear the buffer and fill it with the extended header
     fn xheader(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
         buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
