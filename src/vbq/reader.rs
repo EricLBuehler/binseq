@@ -54,7 +54,6 @@
 //! ```
 
 use std::fs::File;
-use std::io::Read;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -62,7 +61,7 @@ use std::sync::Arc;
 use bitnuc::BitSize;
 use byteorder::{ByteOrder, LittleEndian};
 use memmap2::Mmap;
-use zstd::Decoder;
+use zstd::zstd_safe;
 
 use super::{
     header::{SIZE_BLOCK_HEADER, SIZE_HEADER},
@@ -155,6 +154,9 @@ pub struct RecordBlock {
     /// Reusable buffer for temporary storage during decompression
     /// Using a reusable buffer reduces memory allocations
     rbuf: Vec<u8>,
+
+    /// Reusable zstd decompression context
+    dctx: zstd_safe::DCtx<'static>,
 }
 impl RecordBlock {
     /// Creates a new empty `RecordBlock` with the specified block size
@@ -184,6 +186,7 @@ impl RecordBlock {
             headers: Vec::new(),
             block_size,
             rbuf: Vec::new(),
+            dctx: zstd_safe::DCtx::create(),
         }
     }
 
@@ -267,102 +270,23 @@ impl RecordBlock {
     /// * `bytes` - A slice of bytes containing the block data
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
     /// * `has_header` - A boolean indicating whether the block contains headers
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or an error
     fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
-        let mut pos = 0;
-        loop {
-            // Read the flag and advance the position
-            let flag = if has_flags {
-                if pos + 24 > bytes.len() {
-                    break;
-                }
-                let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-                pos += 8;
-                Some(flag)
-            } else {
-                if pos + 16 > bytes.len() {
-                    break;
-                }
-                None
-            };
-
-            // Read the primary length and advance the position
-            let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            pos += 8;
-
-            // Read the extended length and advance the position
-            let xlen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-            pos += 8;
-
-            // No more records in the block
-            if slen == 0 {
-                // It is possible to end up here if the block is not full
-                // In this case the flag and the length are both zero
-                // and effectively blank but initialized memory.
-                break;
-            }
-
-            // Add the record to the block
-            self.flags.push(flag);
-            self.lens.push(slen);
-            self.lens.push(xlen);
-
-            // Add the primary sequence to the block
-            let mut seq = [0u8; 8];
-            for _ in 0..encoded_sequence_len(slen, self.bitsize) {
-                seq.copy_from_slice(&bytes[pos..pos + 8]);
-                self.sequences.push(LittleEndian::read_u64(&seq));
-                pos += 8;
-            }
-
-            // Add the primary quality score to the block
-            if has_quality {
-                let qual_buffer = &bytes[pos..pos + slen as usize];
-                self.qualities.extend_from_slice(qual_buffer);
-                pos += slen as usize;
-            }
-
-            // Add the primary header to the block
-            if has_header {
-                let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-                self.header_lengths.push(s_header_length);
-                pos += 8; // Fixed: advance by 8 bytes for u64
-
-                let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
-                self.headers.extend_from_slice(s_header_buffer);
-                pos += s_header_length as usize;
-            }
-
-            // Add the extended sequence to the block
-            for _ in 0..encoded_sequence_len(xlen, self.bitsize) {
-                seq.copy_from_slice(&bytes[pos..pos + 8]);
-                self.sequences.push(LittleEndian::read_u64(&seq));
-                pos += 8;
-            }
-
-            // Add the extended quality score to the block
-            if has_quality {
-                let qual_buffer = &bytes[pos..pos + xlen as usize];
-                self.qualities.extend_from_slice(qual_buffer);
-                pos += xlen as usize;
-            }
-
-            // Add the extended header to the block
-            if has_header && xlen > 0 {
-                let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
-                self.header_lengths.push(x_header_length);
-                pos += 8; // Fixed: advance by 8 bytes for u64
-
-                let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
-                self.headers.extend_from_slice(x_header_buffer);
-                pos += x_header_length as usize;
-            }
-        }
+        ingest_bytes(
+            bytes,
+            &mut self.flags,
+            &mut self.lens,
+            &mut self.sequences,
+            &mut self.qualities,
+            &mut self.header_lengths,
+            &mut self.headers,
+            has_quality,
+            has_header,
+            has_flags,
+            self.bitsize,
+        );
     }
 
+    /// Decompresses the given bytes and ingests them into the record block.
     fn ingest_compressed_bytes(
         &mut self,
         bytes: &[u8],
@@ -370,133 +294,156 @@ impl RecordBlock {
         has_header: bool,
         has_flags: bool,
     ) -> Result<()> {
-        let mut decoder = Decoder::with_buffer(bytes)?;
+        // Clear and ensure capacity
+        self.rbuf.clear();
+        if self.rbuf.capacity() < self.block_size {
+            self.rbuf.reserve(self.block_size - self.rbuf.capacity());
+        }
 
-        let mut pos = 0;
-        loop {
-            let (flag, slen, xlen) = if has_flags {
-                // Check that we have enough bytes to at least read the flag
-                // and lengths. If not, break out of the loop.
-                if pos + 24 > self.block_size {
-                    break;
-                }
+        // Reuse the decompression context - avoids allocation!
+        self.dctx
+            .decompress(&mut self.rbuf, bytes)
+            .map_err(|code| std::io::Error::other(zstd_safe::get_error_name(code)))?;
 
-                // Pull the preambles out of the compressed block and advance the position
-                let mut preamble = [0u8; 24];
-                decoder.read_exact(&mut preamble)?;
-                pos += 24;
+        if self.rbuf.len() != self.block_size {
+            return Err(ReadError::PartialRecord(self.rbuf.len()).into());
+        }
 
-                // Read the flag + lengths
-                let flag = LittleEndian::read_u64(&preamble[0..8]);
-                let slen = LittleEndian::read_u64(&preamble[8..16]);
-                let xlen = LittleEndian::read_u64(&preamble[16..24]);
-                (Some(flag), slen, xlen)
-            } else {
-                // Check that we have enough bytes to at least read the
-                // lengths. If not, break out of the loop.
-                if pos + 16 > self.block_size {
-                    break;
-                }
+        ingest_bytes(
+            &self.rbuf,
+            &mut self.flags,
+            &mut self.lens,
+            &mut self.sequences,
+            &mut self.qualities,
+            &mut self.header_lengths,
+            &mut self.headers,
+            has_quality,
+            has_header,
+            has_flags,
+            self.bitsize,
+        );
+        Ok(())
+    }
+}
 
-                // Pull the preambles out of the compressed block and advance the position
-                let mut preamble = [0u8; 16];
-                decoder.read_exact(&mut preamble)?;
-                pos += 16;
-
-                // Read the flag + lengths
-                let slen = LittleEndian::read_u64(&preamble[0..8]);
-                let xlen = LittleEndian::read_u64(&preamble[8..16]);
-                (None, slen, xlen)
-            };
-
-            // No more records in the block
-            if slen == 0 {
-                // It is possible to end up here if the block is not full
-                // In this case the flag and the length are both zero
-                // and effectively blank but initialized memory.
+/// Ingest the bytes from a block into the record block
+///
+/// This method takes a slice of bytes and processes it to extract
+/// the records from the block. It is used when reading a block from
+/// a file into a record block.
+///
+/// This is a private method used primarily for parallel processing.
+///
+/// # Parameters
+///
+/// * `bytes` - A slice of bytes containing the block data
+/// * `has_quality` - A boolean indicating whether the block contains quality scores
+/// * `has_header` - A boolean indicating whether the block contains headers
+///
+/// # Returns
+///
+/// A `Result` indicating success or an error
+fn ingest_bytes(
+    bytes: &[u8],
+    flags: &mut Vec<Option<u64>>,
+    lens: &mut Vec<u64>,
+    sequences: &mut Vec<u64>,
+    qualities: &mut Vec<u8>,
+    header_lengths: &mut Vec<u64>,
+    headers: &mut Vec<u8>,
+    has_quality: bool,
+    has_header: bool,
+    has_flags: bool,
+    bitsize: BitSize,
+) {
+    let mut pos = 0;
+    loop {
+        // Read the flag and advance the position
+        let flag = if has_flags {
+            if pos + 24 > bytes.len() {
                 break;
             }
-
-            // Add the record to the block
-            self.flags.push(flag);
-            self.lens.push(slen);
-            self.lens.push(xlen);
-
-            // Read the primary sequence and advance the position
-            let schunk = encoded_sequence_len(slen, self.bitsize);
-            let schunk_bytes = schunk * 8;
-            self.rbuf.resize(schunk_bytes, 0);
-            decoder.read_exact(&mut self.rbuf[0..schunk_bytes])?;
-            for chunk in self.rbuf.chunks_exact(8) {
-                let seq_part = LittleEndian::read_u64(chunk);
-                self.sequences.push(seq_part);
+            let flag = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+            pos += 8;
+            Some(flag)
+        } else {
+            if pos + 16 > bytes.len() {
+                break;
             }
-            self.rbuf.clear();
-            pos += schunk_bytes;
+            None
+        };
 
-            // Add the primary quality score to the block
-            if has_quality {
-                self.rbuf.resize(slen as usize, 0);
-                decoder.read_exact(&mut self.rbuf[0..slen as usize])?;
-                self.qualities.extend_from_slice(&self.rbuf);
-                self.rbuf.clear();
-                pos += slen as usize;
-            }
+        // Read the primary length and advance the position
+        let slen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+        pos += 8;
 
-            // Add the primary header to the block
-            if has_header {
-                self.rbuf.resize(8, 0);
-                decoder.read_exact(&mut self.rbuf[0..8])?;
-                let s_header_length = LittleEndian::read_u64(&self.rbuf);
-                self.header_lengths.push(s_header_length);
-                self.rbuf.clear();
-                pos += 8;
+        // Read the extended length and advance the position
+        let xlen = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+        pos += 8;
 
-                self.rbuf.resize(s_header_length as usize, 0);
-                decoder.read_exact(&mut self.rbuf[0..s_header_length as usize])?;
-                self.headers.extend_from_slice(&self.rbuf);
-                self.rbuf.clear();
-                pos += s_header_length as usize;
-            }
-
-            // Read the extended sequence and advance the position
-            let xchunk = encoded_sequence_len(xlen, self.bitsize);
-            let xchunk_bytes = xchunk * 8;
-            self.rbuf.resize(xchunk_bytes, 0);
-            decoder.read_exact(&mut self.rbuf[0..xchunk_bytes])?;
-            for chunk in self.rbuf.chunks_exact(8) {
-                let seq_part = LittleEndian::read_u64(chunk);
-                self.sequences.push(seq_part);
-            }
-            self.rbuf.clear();
-            pos += xchunk_bytes;
-
-            // Add the extended quality score to the block
-            if has_quality {
-                self.rbuf.resize(xlen as usize, 0);
-                decoder.read_exact(&mut self.rbuf[0..xlen as usize])?;
-                self.qualities.extend_from_slice(&self.rbuf);
-                self.rbuf.clear();
-                pos += xlen as usize;
-            }
-
-            // Add the extended header to the block
-            if has_header && xlen > 0 {
-                self.rbuf.resize(8, 0);
-                decoder.read_exact(&mut self.rbuf[0..8])?;
-                let x_header_length = LittleEndian::read_u64(&self.rbuf);
-                self.header_lengths.push(x_header_length);
-                self.rbuf.clear();
-                pos += 8;
-
-                self.rbuf.resize(x_header_length as usize, 0);
-                decoder.read_exact(&mut self.rbuf[0..x_header_length as usize])?;
-                self.headers.extend_from_slice(&self.rbuf);
-                self.rbuf.clear();
-                pos += x_header_length as usize;
-            }
+        // No more records in the block
+        if slen == 0 {
+            // It is possible to end up here if the block is not full
+            // In this case the flag and the length are both zero
+            // and effectively blank but initialized memory.
+            break;
         }
-        Ok(())
+
+        // Add the record to the block
+        flags.push(flag);
+        lens.push(slen);
+        lens.push(xlen);
+
+        // Add the primary sequence to the block
+        let mut seq = [0u8; 8];
+        for _ in 0..encoded_sequence_len(slen, bitsize) {
+            seq.copy_from_slice(&bytes[pos..pos + 8]);
+            sequences.push(LittleEndian::read_u64(&seq));
+            pos += 8;
+        }
+
+        // Add the primary quality score to the block
+        if has_quality {
+            let qual_buffer = &bytes[pos..pos + slen as usize];
+            qualities.extend_from_slice(qual_buffer);
+            pos += slen as usize;
+        }
+
+        // Add the primary header to the block
+        if has_header {
+            let s_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+            header_lengths.push(s_header_length);
+            pos += 8; // Fixed: advance by 8 bytes for u64
+
+            let s_header_buffer = &bytes[pos..pos + s_header_length as usize];
+            headers.extend_from_slice(s_header_buffer);
+            pos += s_header_length as usize;
+        }
+
+        // Add the extended sequence to the block
+        for _ in 0..encoded_sequence_len(xlen, bitsize) {
+            seq.copy_from_slice(&bytes[pos..pos + 8]);
+            sequences.push(LittleEndian::read_u64(&seq));
+            pos += 8;
+        }
+
+        // Add the extended quality score to the block
+        if has_quality {
+            let qual_buffer = &bytes[pos..pos + xlen as usize];
+            qualities.extend_from_slice(qual_buffer);
+            pos += xlen as usize;
+        }
+
+        // Add the extended header to the block
+        if has_header && xlen > 0 {
+            let x_header_length = LittleEndian::read_u64(&bytes[pos..pos + 8]);
+            header_lengths.push(x_header_length);
+            pos += 8; // Fixed: advance by 8 bytes for u64
+
+            let x_header_buffer = &bytes[pos..pos + x_header_length as usize];
+            headers.extend_from_slice(x_header_buffer);
+            pos += x_header_length as usize;
+        }
     }
 }
 
