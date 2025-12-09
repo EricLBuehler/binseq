@@ -307,7 +307,7 @@ impl RecordBlock {
         self.dctx
             .decompress(&mut self.rbuf, bytes)
             .map_err(|code| {
-                std::io::Error::new(std::io::ErrorKind::Other, zstd_safe::get_error_name(code))
+                std::io::Error::other(zstd_safe::get_error_name(code))
             })?;
 
         if self.rbuf.len() != self.block_size {
