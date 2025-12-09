@@ -10,7 +10,8 @@ use std::{
 use anyhow::{bail, Result};
 use binseq::{
     bq::{self, BinseqHeaderBuilder},
-    BinseqReader, BinseqRecord, Context, ParallelProcessor, ParallelReader,
+    context::SeqCtx,
+    prelude::*,
 };
 use nucgen::Sequence;
 
@@ -18,7 +19,7 @@ use nucgen::Sequence;
 pub struct MyProcessor {
     local_counter: usize,
     counter: Arc<AtomicUsize>,
-    ctx: Context,
+    ctx: SeqCtx,
 }
 impl MyProcessor {
     #[must_use]

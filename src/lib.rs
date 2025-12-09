@@ -99,7 +99,6 @@ pub mod prelude;
 /// Context - Reusable state for parallel processing
 pub mod context;
 
-pub use context::Context;
 pub use error::{Error, IntoBinseqError, Result};
 pub use parallel::{BinseqReader, ParallelProcessor, ParallelReader};
 pub use policy::{Policy, RNG_SEED};
