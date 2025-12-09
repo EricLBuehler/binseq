@@ -49,23 +49,17 @@ pub trait QualityContext {
             let slen = record.slen() as usize;
             let squal = self.squal_mut();
             if squal.len() != slen {
-                squal.reserve(slen);
-                unsafe {
-                    squal.set_len(slen);
-                }
+                squal.resize(slen, DEFAULT_QUALITY);
             }
-            squal[..slen].copy_from_slice(record.squal());
+            squal.copy_from_slice(record.squal());
 
             if record.is_paired() {
                 let xlen = record.xlen() as usize;
                 let xqual = self.xqual_mut();
                 if xqual.len() != xlen {
-                    xqual.reserve(xlen);
-                    unsafe {
-                        xqual.set_len(xlen);
-                    }
+                    xqual.resize(xlen, DEFAULT_QUALITY);
                 }
-                xqual[..xlen].copy_from_slice(record.xqual());
+                xqual.copy_from_slice(record.xqual());
             }
         } else {
             self.ensure_quality_capacity(record);
