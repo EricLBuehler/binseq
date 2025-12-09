@@ -270,10 +270,6 @@ impl RecordBlock {
     /// * `bytes` - A slice of bytes containing the block data
     /// * `has_quality` - A boolean indicating whether the block contains quality scores
     /// * `has_header` - A boolean indicating whether the block contains headers
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or an error
     fn ingest_bytes(&mut self, bytes: &[u8], has_quality: bool, has_header: bool, has_flags: bool) {
         ingest_bytes(
             bytes,
@@ -290,6 +286,7 @@ impl RecordBlock {
         );
     }
 
+    /// Decompresses the given bytes and ingests them into the record block.
     fn ingest_compressed_bytes(
         &mut self,
         bytes: &[u8],
