@@ -97,7 +97,7 @@ impl BinseqRecord for RefRecord<'_> {
 
     /// Clear the buffer and fill it with the extended header
     fn xheader(&self) -> &[u8] {
-        &self.header_buf[self.header_len..]
+        self.sheader()
     }
 
     fn flag(&self) -> Option<u64> {
