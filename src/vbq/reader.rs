@@ -512,11 +512,16 @@ impl RecordBlock {
 pub struct RecordBlockIter<'a> {
     block: &'a RecordBlock,
     pos: usize,
+    header_buffer: itoa::Buffer,
 }
 impl<'a> RecordBlockIter<'a> {
     #[must_use]
     pub fn new(block: &'a RecordBlock) -> Self {
-        Self { block, pos: 0 }
+        Self {
+            block,
+            pos: 0,
+            header_buffer: itoa::Buffer::new(),
+        }
     }
 }
 impl<'a> Iterator for RecordBlockIter<'a> {
@@ -530,7 +535,19 @@ impl<'a> Iterator for RecordBlockIter<'a> {
         let meta = &self.block.records[self.pos];
         let index = (self.block.index + self.pos) as u64;
         let index_in_block = self.pos;
-        self.pos += 1;
+
+        let mut header_buf = [0; 20];
+        let mut header_len = 0;
+        if meta.s_header_span.len == 0 && meta.x_header_span.len == 0 {
+            let header_str = self.header_buffer.format(index);
+            header_len = header_str.len();
+            header_buf[..header_len].copy_from_slice(header_str.as_bytes());
+        }
+
+        // increment position
+        {
+            self.pos += 1;
+        }
 
         Some(RefRecord {
             block: self.block,
@@ -548,6 +565,8 @@ impl<'a> Iterator for RecordBlockIter<'a> {
             xqual: meta.x_qual_span.slice(&self.block.rbuf),
             sheader: meta.s_header_span.slice(&self.block.rbuf),
             xheader: meta.x_header_span.slice(&self.block.rbuf),
+            header_buf,
+            header_len,
         })
     }
 }
@@ -567,6 +586,8 @@ pub struct RefRecord<'a> {
     xqual: &'a [u8],
     sheader: &'a [u8],
     xheader: &'a [u8],
+    header_buf: [u8; 20],
+    header_len: usize,
 }
 
 impl<'a> BinseqRecord for RefRecord<'a> {
@@ -578,21 +599,19 @@ impl<'a> BinseqRecord for RefRecord<'a> {
         self.index
     }
 
-    fn sheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
+    fn sheader(&self) -> &[u8] {
         if self.sheader.is_empty() {
-            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+            &self.header_buf[..self.header_len]
         } else {
-            buffer.extend_from_slice(self.sheader);
+            self.sheader
         }
     }
 
-    fn xheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
+    fn xheader(&self) -> &[u8] {
         if self.xheader.is_empty() {
-            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+            &self.header_buf[..self.header_len]
         } else {
-            buffer.extend_from_slice(self.xheader);
+            self.xheader
         }
     }
 

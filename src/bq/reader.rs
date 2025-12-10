@@ -41,6 +41,10 @@ pub struct RefRecord<'a> {
     buffer: &'a [u64],
     /// The configuration that defines the layout and size of record components
     config: RecordConfig,
+    /// Cached index string for the sequence header
+    header_buf: [u8; 20],
+    /// Length of the header in bytes
+    header_len: usize,
 }
 impl<'a> RefRecord<'a> {
     /// Creates a new record reference
@@ -57,7 +61,13 @@ impl<'a> RefRecord<'a> {
     #[must_use]
     pub fn new(id: u64, buffer: &'a [u64], config: RecordConfig) -> Self {
         assert_eq!(buffer.len(), config.record_size_u64());
-        Self { id, buffer, config }
+        Self {
+            id,
+            buffer,
+            config,
+            header_buf: [0; 20],
+            header_len: 0,
+        }
     }
     /// Returns the record's configuration
     ///
@@ -65,6 +75,11 @@ impl<'a> RefRecord<'a> {
     #[must_use]
     pub fn config(&self) -> RecordConfig {
         self.config
+    }
+
+    pub fn set_id(&mut self, id: &[u8]) {
+        self.header_len = id.len();
+        self.header_buf[..self.header_len].copy_from_slice(id);
     }
 }
 
@@ -76,16 +91,15 @@ impl BinseqRecord for RefRecord<'_> {
         self.id
     }
     /// Clear the buffer and fill it with the sequence header
-    fn sheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
-        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    fn sheader(&self) -> &[u8] {
+        &self.header_buf[..self.header_len]
     }
 
     /// Clear the buffer and fill it with the extended header
-    fn xheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
-        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    fn xheader(&self) -> &[u8] {
+        &self.header_buf[self.header_len..]
     }
+
     fn flag(&self) -> Option<u64> {
         if self.config.flags {
             Some(self.buffer[0])
@@ -713,8 +727,14 @@ impl ParallelReader for MmapReader {
                     return Ok(()); // No records for this thread
                 }
 
+                let mut translater = itoa::Buffer::new();
+
                 for (batch_idx, idx) in (start_idx..end_idx).enumerate() {
-                    let record = reader.get(idx)?;
+                    let id_str = translater.format(idx);
+
+                    let mut record = reader.get(idx)?;
+                    record.set_id(id_str.as_bytes());
+
                     processor.process_record(record)?;
 
                     if batch_idx % BATCH_SIZE == 0 {
