@@ -44,18 +44,16 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     // Read the binary sequence
     let reader = MmapReader::new(binseq_path)?;
     let mut num_records_read = 0;
-    let mut record_buffer = Vec::new();
     for idx in 0..reader.num_records() {
         let record = reader.get(idx)?;
-        record.decode_s(&mut record_buffer)?;
+        let seq = record.sseq();
 
         // Check if the decoded sequence matches the original
-        let buf_str = std::str::from_utf8(&record_buffer)?;
+        let buf_str = std::str::from_utf8(&seq)?;
         let seq_str = std::str::from_utf8(&all_sequences[num_records_read])?;
         assert_eq!(buf_str, seq_str);
 
         num_records_read += 1;
-        record_buffer.clear();
     }
     eprintln!("Finished reading {num_records_read} records (mmap)");
     eprintln!(
@@ -131,28 +129,21 @@ fn read_write_paired(
 
     // Read the binary sequence with mmap
     let reader = MmapReader::new(binseq_path)?;
-    let mut sbuf = Vec::new();
-    let mut xbuf = Vec::new();
 
     let mut n_processed = 0;
 
     for idx in 0..reader.num_records() {
         let record = reader.get(idx)?;
-        record.decode_s(&mut sbuf)?;
-        record.decode_x(&mut xbuf)?;
 
         // Check if the decoded sequence matches the original
-        let s_str = std::str::from_utf8(&sbuf)?;
-        let x_str = std::str::from_utf8(&xbuf)?;
+        let s_str = std::str::from_utf8(record.sseq())?;
+        let x_str = std::str::from_utf8(record.xseq())?;
 
         let s_exp = std::str::from_utf8(&r1_storage[n_processed])?;
         let x_exp = std::str::from_utf8(&r2_storage[n_processed])?;
 
         assert_eq!(s_str, s_exp);
         assert_eq!(x_str, x_exp);
-
-        sbuf.clear();
-        xbuf.clear();
 
         n_processed += 1;
     }
