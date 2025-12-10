@@ -22,6 +22,7 @@ pub trait SequenceContext {
         self.xbuf_mut().clear();
     }
     #[inline]
+    #[allow(deprecated)]
     fn fill_sequences<R: BinseqRecord>(&mut self, record: &R) -> Result<()> {
         self.clear_sequences();
         record.decode_s(self.sbuf_mut())?;
@@ -99,9 +100,10 @@ pub trait HeaderContext {
 
     #[inline]
     fn fill_headers<R: BinseqRecord>(&mut self, record: &R) {
-        record.sheader(self.sheader_mut());
+        self.clear_headers();
+        self.sheader_mut().extend_from_slice(record.sheader());
         if record.is_paired() {
-            record.xheader(self.xheader_mut());
+            self.xheader_mut().extend_from_slice(record.xheader());
         }
     }
 }

@@ -36,19 +36,15 @@
 //! let mut block = reader.new_block();
 //!
 //! // Read records with headers and quality scores
-//! let mut seq_buffer = Vec::new();
-//! let mut header_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
-//!         record.decode_s(&mut seq_buffer).unwrap();
-//!         record.sheader(&mut header_buffer);
-//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
-//!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
+//!         let seq = record.sseq();
+//!         let header = record.sheader();
+//!         println!("Header: {}", std::str::from_utf8(header).unwrap());
+//!         println!("Sequence: {}", std::str::from_utf8(seq).unwrap());
 //!         if !record.squal().is_empty() {
 //!             println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
 //!         }
-//!         seq_buffer.clear();
-//!         header_buffer.clear();
 //!     }
 //! }
 //! ```
@@ -180,6 +176,9 @@ pub struct RecordBlock {
 
     /// Reusable zstd decompression context
     dctx: zstd_safe::DCtx<'static>,
+
+    /// Reusable decoding buffer for the block
+    dbuf: Vec<u8>,
 }
 impl RecordBlock {
     /// Creates a new empty `RecordBlock` with the specified block size
@@ -205,6 +204,7 @@ impl RecordBlock {
             records: Vec::default(),
             sequences: Vec::default(),
             rbuf: Vec::default(),
+            dbuf: Vec::default(),
             dctx: zstd_safe::DCtx::create(),
         }
     }
@@ -270,6 +270,7 @@ impl RecordBlock {
         self.index = 0;
         self.records.clear();
         self.sequences.clear();
+        self.dbuf.clear();
         // Note: We keep rbuf allocated for reuse
     }
 
@@ -430,24 +431,95 @@ impl RecordBlock {
                 slen,
                 xlen,
                 s_seq_span,
-                x_seq_span,
                 s_qual_span,
                 s_header_span,
+                x_seq_span,
                 x_qual_span,
                 x_header_span,
             });
         }
+    }
+
+    /// Decodes all sequences in the block at once.
+    ///
+    /// Note:
+    /// Each record's sequence is padded internally to the nearest u64.
+    /// Because of this the global decoding will include nucleotides that are not present in the original data.
+    /// We track the non-contiguous regions of the sequence separately.
+    pub fn decode_all(&mut self) -> Result<()> {
+        if self.sequences.is_empty() {
+            return Ok(());
+        }
+        self.dbuf.clear();
+        match self.bitsize {
+            BitSize::Two => {
+                let num_bp = self.sequences.len() * 32;
+                bitnuc::twobit::decode(&self.sequences, num_bp, &mut self.dbuf)
+            }
+            BitSize::Four => {
+                let num_bp = self.sequences.len() * 16;
+                bitnuc::fourbit::decode(&self.sequences, num_bp, &mut self.dbuf)
+            }
+        }?;
+        Ok(())
+    }
+
+    /// Get decoded primary sequence for a record by index
+    #[must_use]
+    pub fn get_decoded_s(&self, record_idx: usize) -> Option<&[u8]> {
+        let meta = self.records.get(record_idx)?;
+        if self.dbuf.is_empty() {
+            return None;
+        }
+
+        let bases_per_word = match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
+        };
+
+        // Calculate offset in decoded buffer (accounting for padding)
+        let offset = meta.s_seq_span.offset * bases_per_word;
+        let len = meta.slen as usize;
+
+        Some(&self.dbuf[offset..offset + len])
+    }
+
+    /// Get decoded extended sequence for a record by index
+    #[must_use]
+    pub fn get_decoded_x(&self, record_idx: usize) -> Option<&[u8]> {
+        let meta = self.records.get(record_idx)?;
+        if meta.xlen == 0 {
+            return Some(&[]);
+        }
+        if self.dbuf.is_empty() {
+            return None;
+        }
+
+        let bases_per_word = match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
+        };
+
+        let offset = meta.x_seq_span.offset * bases_per_word;
+        let len = meta.xlen as usize;
+
+        Some(&self.dbuf[offset..offset + len])
     }
 }
 
 pub struct RecordBlockIter<'a> {
     block: &'a RecordBlock,
     pos: usize,
+    header_buffer: itoa::Buffer,
 }
 impl<'a> RecordBlockIter<'a> {
     #[must_use]
     pub fn new(block: &'a RecordBlock) -> Self {
-        Self { block, pos: 0 }
+        Self {
+            block,
+            pos: 0,
+            header_buffer: itoa::Buffer::new(),
+        }
     }
 }
 impl<'a> Iterator for RecordBlockIter<'a> {
@@ -460,11 +532,26 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 
         let meta = &self.block.records[self.pos];
         let index = (self.block.index + self.pos) as u64;
-        self.pos += 1;
+        let index_in_block = self.pos;
+
+        let mut header_buf = [0; 20];
+        let mut header_len = 0;
+        if meta.s_header_span.len == 0 && meta.x_header_span.len == 0 {
+            let header_str = self.header_buffer.format(index);
+            header_len = header_str.len();
+            header_buf[..header_len].copy_from_slice(header_str.as_bytes());
+        }
+
+        // increment position
+        {
+            self.pos += 1;
+        }
 
         Some(RefRecord {
+            block: self.block,
             bitsize: self.block.bitsize,
             index,
+            index_in_block,
             flag: meta.flag,
             slen: meta.slen,
             xlen: meta.xlen,
@@ -476,14 +563,18 @@ impl<'a> Iterator for RecordBlockIter<'a> {
             xqual: meta.x_qual_span.slice(&self.block.rbuf),
             sheader: meta.s_header_span.slice(&self.block.rbuf),
             xheader: meta.x_header_span.slice(&self.block.rbuf),
+            header_buf,
+            header_len,
         })
     }
 }
 
 /// Zero-copy record reference
 pub struct RefRecord<'a> {
+    block: &'a RecordBlock,
     bitsize: BitSize,
     index: u64,
+    index_in_block: usize,
     flag: Option<u64>,
     slen: u64,
     xlen: u64,
@@ -493,9 +584,11 @@ pub struct RefRecord<'a> {
     xqual: &'a [u8],
     sheader: &'a [u8],
     xheader: &'a [u8],
+    header_buf: [u8; 20],
+    header_len: usize,
 }
 
-impl<'a> BinseqRecord for RefRecord<'a> {
+impl BinseqRecord for RefRecord<'_> {
     fn bitsize(&self) -> BitSize {
         self.bitsize
     }
@@ -504,21 +597,19 @@ impl<'a> BinseqRecord for RefRecord<'a> {
         self.index
     }
 
-    fn sheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
+    fn sheader(&self) -> &[u8] {
         if self.sheader.is_empty() {
-            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+            &self.header_buf[..self.header_len]
         } else {
-            buffer.extend_from_slice(self.sheader);
+            self.sheader
         }
     }
 
-    fn xheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
+    fn xheader(&self) -> &[u8] {
         if self.xheader.is_empty() {
-            buffer.extend_from_slice(itoa::Buffer::new().format(self.index).as_bytes());
+            &self.header_buf[..self.header_len]
         } else {
-            buffer.extend_from_slice(self.xheader);
+            self.xheader
         }
     }
 
@@ -548,6 +639,42 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 
     fn xqual(&self) -> &[u8] {
         self.xqual
+    }
+
+    /// Override this method since we can make use of block information
+    fn decode_s(&self, buf: &mut Vec<u8>) -> Result<()> {
+        if let Some(decoded) = self.block.get_decoded_s(self.index_in_block) {
+            buf.extend_from_slice(decoded);
+        } else {
+            self.bitsize()
+                .decode(self.sbuf(), self.slen() as usize, buf)?;
+        }
+        Ok(())
+    }
+
+    /// Override this method since we can make use of block information
+    fn decode_x(&self, buf: &mut Vec<u8>) -> Result<()> {
+        if let Some(decoded) = self.block.get_decoded_x(self.index_in_block) {
+            buf.extend_from_slice(decoded);
+        } else {
+            self.bitsize()
+                .decode(self.xbuf(), self.xlen() as usize, buf)?;
+        }
+        Ok(())
+    }
+
+    /// Override this method since we can make use of block information
+    fn sseq(&self) -> &[u8] {
+        self.block
+            .get_decoded_s(self.index_in_block)
+            .expect("Reader was built without batch-decoding")
+    }
+
+    /// Override this method since we can make use of block information
+    fn xseq(&self) -> &[u8] {
+        self.block
+            .get_decoded_x(self.index_in_block)
+            .expect("Reader was built without batch-decoding")
     }
 }
 
@@ -589,13 +716,13 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 /// use binseq::vbq::MmapReader;
 /// use binseq::{BinseqRecord, Result};
 ///
+/// #[allow(deprecated)]
 /// fn main() -> Result<()> {
 ///     let path = "./data/subset.vbq";
 ///     let mut reader = MmapReader::new(path)?; // Index loaded automatically
 ///
 ///     // Create buffers for sequence data and headers
 ///     let mut seq_buffer = Vec::new();
-///     let mut header_buffer = Vec::new();
 ///     let mut block = reader.new_block();
 ///
 ///     // Read blocks sequentially
@@ -604,13 +731,12 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 ///         for record in block.iter() {
 ///             // Decode sequence and header
 ///             record.decode_s(&mut seq_buffer)?;
-///             record.sheader(&mut header_buffer);
+///             let header = record.sheader();
 ///
-///             println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap_or(""));
+///             println!("Header: {}", std::str::from_utf8(&header).unwrap_or(""));
 ///             println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap_or(""));
 ///
 ///             seq_buffer.clear();
-///             header_buffer.clear();
 ///         }
 ///     }
 ///     Ok(())
@@ -631,6 +757,9 @@ pub struct MmapReader {
 
     /// Total number of records read from the file so far
     total: usize,
+
+    /// Whether to decode sequences at once in each block
+    decode_block: bool,
 }
 impl MmapReader {
     /// Creates a new `MmapReader` for a VBINSEQ file
@@ -689,6 +818,7 @@ impl MmapReader {
             header,
             pos: SIZE_HEADER,
             total: 0,
+            decode_block: true,
         })
     }
 
@@ -712,6 +842,24 @@ impl MmapReader {
     #[must_use]
     pub fn new_block(&self) -> RecordBlock {
         RecordBlock::new(self.header.bits, self.header.block as usize)
+    }
+
+    /// Sets whether to decode sequences at once in each block
+    ///
+    /// # Arguments
+    ///
+    /// * `decode_block` - Whether to decode sequences at once in each block
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use binseq::vbq::MmapReader;
+    ///
+    /// let mut reader = MmapReader::new("example.vbq").unwrap();
+    /// reader.set_decode_block(false);
+    /// ```
+    pub fn set_decode_block(&mut self, decode_block: bool) {
+        self.decode_block = decode_block;
     }
 
     /// Returns the path where the index file would be located
@@ -1165,6 +1313,11 @@ impl ParallelReader for MmapReader {
 
                     // Update the record block index
                     record_block.update_index(block_range.cumulative_records as usize);
+
+                    // decode the data
+                    if self.decode_block {
+                        record_block.decode_all()?;
+                    }
 
                     // Process records in this block that fall within our range
                     for record in record_block.iter() {

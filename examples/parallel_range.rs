@@ -8,7 +8,6 @@ struct RangeProcessor {
     tid: Option<usize>,
     range_start: usize,
     range_end: usize,
-    sbuf: Vec<u8>,
 }
 
 impl RangeProcessor {
@@ -18,7 +17,6 @@ impl RangeProcessor {
             tid: None,
             range_start,
             range_end,
-            sbuf: Vec::new(),
         }
     }
 
@@ -34,9 +32,6 @@ impl ParallelProcessor for RangeProcessor {
         // Print progress every 10,000 records
         if count % 10_000 == 0 {
             if let Some(tid) = self.tid {
-                // Decode the sequence to get its length
-                self.sbuf.clear();
-                record.decode_s(&mut self.sbuf)?;
                 println!(
                     "Thread {}: Processed {} records (Range: {}-{}, Index: {}, Len: {})",
                     tid,
@@ -44,7 +39,7 @@ impl ParallelProcessor for RangeProcessor {
                     self.range_start,
                     self.range_end,
                     record.index(),
-                    self.sbuf.len()
+                    record.sseq().len(),
                 );
             }
         }

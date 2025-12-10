@@ -26,6 +26,18 @@ impl BinseqReader {
         }
     }
 
+    /// Set whether to decode sequences at once in each block
+    ///
+    /// Note: This setting applies to VBQ readers only.
+    pub fn set_decode_block(&mut self, decode_block: bool) {
+        match self {
+            Self::Bq(_) => {
+                // no-op
+            }
+            Self::Vbq(reader) => reader.set_decode_block(decode_block),
+        }
+    }
+
     #[must_use]
     pub fn is_paired(&self) -> bool {
         match self {

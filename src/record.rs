@@ -22,11 +22,11 @@ pub trait BinseqRecord {
     /// Returns the flag value of this record
     fn flag(&self) -> Option<u64>;
 
-    /// Fills a buffer with the header of this record.
-    fn sheader(&self, buffer: &mut Vec<u8>);
+    /// Returns the header of this record
+    fn sheader(&self) -> &[u8];
 
-    /// Fills a buffer with the header of the extended/paired sequence (empty if not paired)
-    fn xheader(&self, buffer: &mut Vec<u8>);
+    /// Returns the header of the extended/paired sequence (empty if not paired)
+    fn xheader(&self) -> &[u8];
 
     /// Returns the length of the primary sequence of this record
     fn slen(&self) -> u64;
@@ -68,6 +68,22 @@ pub trait BinseqRecord {
         self.bitsize()
             .decode(self.xbuf(), self.xlen() as usize, buf)?;
         Ok(())
+    }
+
+    /// Returns a reference to the primary decoded sequence of this record.
+    ///
+    /// This is not available on all types that implement the `Record` trait.
+    /// It should be available on types that implement it in this library however.
+    fn sseq(&self) -> &[u8] {
+        unimplemented!("This record does not implement direct sequence access");
+    }
+
+    /// Returns a reference to the extended decoded sequence of this record.
+    ///
+    /// This may not be available on all types that implement the `Record` trait.
+    /// It should be available on types that implement it in this library however.
+    fn xseq(&self) -> &[u8] {
+        unimplemented!("This record does not implement direct sequence access");
     }
 
     /// Decodes the primary sequence of this record into a newly allocated buffer.

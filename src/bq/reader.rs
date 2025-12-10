@@ -41,6 +41,10 @@ pub struct RefRecord<'a> {
     buffer: &'a [u64],
     /// The configuration that defines the layout and size of record components
     config: RecordConfig,
+    /// Cached index string for the sequence header
+    header_buf: [u8; 20],
+    /// Length of the header in bytes
+    header_len: usize,
 }
 impl<'a> RefRecord<'a> {
     /// Creates a new record reference
@@ -57,7 +61,13 @@ impl<'a> RefRecord<'a> {
     #[must_use]
     pub fn new(id: u64, buffer: &'a [u64], config: RecordConfig) -> Self {
         assert_eq!(buffer.len(), config.record_size_u64());
-        Self { id, buffer, config }
+        Self {
+            id,
+            buffer,
+            config,
+            header_buf: [0; 20],
+            header_len: 0,
+        }
     }
     /// Returns the record's configuration
     ///
@@ -65,6 +75,11 @@ impl<'a> RefRecord<'a> {
     #[must_use]
     pub fn config(&self) -> RecordConfig {
         self.config
+    }
+
+    pub fn set_id(&mut self, id: &[u8]) {
+        self.header_len = id.len();
+        self.header_buf[..self.header_len].copy_from_slice(id);
     }
 }
 
@@ -76,16 +91,15 @@ impl BinseqRecord for RefRecord<'_> {
         self.id
     }
     /// Clear the buffer and fill it with the sequence header
-    fn sheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
-        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    fn sheader(&self) -> &[u8] {
+        &self.header_buf[..self.header_len]
     }
 
     /// Clear the buffer and fill it with the extended header
-    fn xheader(&self, buffer: &mut Vec<u8>) {
-        buffer.clear();
-        buffer.extend_from_slice(itoa::Buffer::new().format(self.id).as_bytes());
+    fn xheader(&self) -> &[u8] {
+        self.sheader()
     }
+
     fn flag(&self) -> Option<u64> {
         if self.config.flags {
             Some(self.buffer[0])
@@ -111,6 +125,93 @@ impl BinseqRecord for RefRecord<'_> {
             &self.buffer[1 + self.config.schunk as usize..]
         } else {
             &self.buffer[self.config.schunk as usize..]
+        }
+    }
+}
+
+/// A reference to a record in the map with a precomputed decoded buffer slice
+pub struct BatchRecord<'a> {
+    /// Unprocessed buffer slice (with flags)
+    buffer: &'a [u64],
+    /// Decoded buffer slice
+    dbuf: &'a [u8],
+    /// Record ID
+    id: u64,
+    /// The configuration that defines the layout and size of record components
+    config: RecordConfig,
+    /// Cached index string for the sequence header
+    header_buf: [u8; 20],
+    /// Length of the header in bytes
+    header_len: usize,
+}
+impl BinseqRecord for BatchRecord<'_> {
+    fn bitsize(&self) -> BitSize {
+        self.config.bitsize
+    }
+    fn index(&self) -> u64 {
+        self.id
+    }
+    /// Clear the buffer and fill it with the sequence header
+    fn sheader(&self) -> &[u8] {
+        &self.header_buf[..self.header_len]
+    }
+
+    /// Clear the buffer and fill it with the extended header
+    fn xheader(&self) -> &[u8] {
+        self.sheader()
+    }
+
+    fn flag(&self) -> Option<u64> {
+        if self.config.flags {
+            Some(self.buffer[0])
+        } else {
+            None
+        }
+    }
+    fn slen(&self) -> u64 {
+        self.config.slen
+    }
+    fn xlen(&self) -> u64 {
+        self.config.xlen
+    }
+    fn sbuf(&self) -> &[u64] {
+        if self.config.flags {
+            &self.buffer[1..=(self.config.schunk as usize)]
+        } else {
+            &self.buffer[..(self.config.schunk as usize)]
+        }
+    }
+    fn xbuf(&self) -> &[u64] {
+        if self.config.flags {
+            &self.buffer[1 + self.config.schunk as usize..]
+        } else {
+            &self.buffer[self.config.schunk as usize..]
+        }
+    }
+    fn decode_s(&self, dbuf: &mut Vec<u8>) -> Result<()> {
+        dbuf.extend_from_slice(self.sseq());
+        Ok(())
+    }
+    fn decode_x(&self, dbuf: &mut Vec<u8>) -> Result<()> {
+        dbuf.extend_from_slice(self.xseq());
+        Ok(())
+    }
+    /// Override this method since we can make use of block information
+    fn sseq(&self) -> &[u8] {
+        if self.config.flags {
+            let scalar = self.config.scalar();
+            &self.dbuf[scalar..scalar + self.config.slen()]
+        } else {
+            &self.dbuf[..self.config.slen()]
+        }
+    }
+    /// Override this method since we can make use of block information
+    fn xseq(&self) -> &[u8] {
+        if self.config.flags {
+            let scalar = self.config.scalar();
+            &self.dbuf[scalar + self.config.slen()..]
+        } else {
+            &self.dbuf[self.config.slen()..]
         }
     }
 }
@@ -240,6 +341,14 @@ impl RecordConfig {
             (self.schunk + self.xchunk + 1) as usize
         } else {
             (self.schunk + self.xchunk) as usize
+        }
+    }
+
+    /// The number of nucleotides per word
+    pub fn scalar(&self) -> usize {
+        match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
         }
     }
 }
@@ -384,6 +493,23 @@ impl MmapReader {
         let bytes = &self.mmap[lbound..rbound];
         let buffer = cast_slice(bytes);
         Ok(RefRecord::new(idx as u64, buffer, self.config))
+    }
+
+    /// Returns a slice of the buffer containing the underlying u64 for that range
+    /// of records.
+    ///
+    /// Note: range 10..40 will return all u64s in the mmap between the record index 10 and 40
+    pub fn get_buffer_slice(&self, range: Range<usize>) -> Result<&[u64]> {
+        if range.end > self.num_records() {
+            return Err(ReadError::OutOfRange(range.end, self.num_records()).into());
+        }
+        let rsize = self.config.record_size_bytes();
+        let total_records = range.end - range.start;
+        let lbound = SIZE_HEADER + (range.start * rsize);
+        let rbound = lbound + (total_records * rsize);
+        let bytes = &self.mmap[lbound..rbound];
+        let buffer = cast_slice(bytes);
+        Ok(buffer)
     }
 }
 
@@ -713,15 +839,71 @@ impl ParallelReader for MmapReader {
                     return Ok(()); // No records for this thread
                 }
 
-                for (batch_idx, idx) in (start_idx..end_idx).enumerate() {
-                    let record = reader.get(idx)?;
-                    processor.process_record(record)?;
+                // create a reusable buffer for translating record IDs
+                let mut translater = itoa::Buffer::new();
 
-                    if batch_idx % BATCH_SIZE == 0 {
-                        processor.on_batch_complete()?;
-                    }
+                // initialize a decoding buffer
+                let mut dbuf = Vec::new();
+
+                // calculate the size of a record in the cast u64 slice
+                let rsize_u64 = reader.config.record_size_bytes() / 8;
+
+                // determine the required scalar size
+                let scalar = reader.config.scalar();
+
+                // calculate the size of a record in the batch decoded buffer
+                let mut dbuf_rsize = { (reader.config.schunk() + reader.config.xchunk()) * scalar };
+                if reader.config.flags {
+                    dbuf_rsize += scalar;
                 }
-                processor.on_batch_complete()?;
+
+                // iterate over the range of indices
+                for range_start in (start_idx..end_idx).step_by(BATCH_SIZE) {
+                    let range_end = (range_start + BATCH_SIZE).min(end_idx);
+
+                    // clear the decoded buffer
+                    dbuf.clear();
+
+                    // get the encoded buffer slice
+                    let ebuf = reader.get_buffer_slice(range_start..range_end)?;
+
+                    // decode the entire buffer at once (with flags and extra bases)
+                    reader
+                        .config
+                        .bitsize
+                        .decode(ebuf, ebuf.len() * scalar, &mut dbuf)?;
+
+                    // iterate over each index in the range
+                    for (inner_idx, idx) in (range_start..range_end).enumerate() {
+                        // translate the index
+                        let id_str = translater.format(idx);
+
+                        // create the index buffer
+                        let mut header_buf = [0; 20];
+                        let header_len = id_str.len();
+                        header_buf[..header_len].copy_from_slice(id_str.as_bytes());
+
+                        // find the buffer starts
+                        let ebuf_start = inner_idx * rsize_u64;
+                        let dbuf_start = inner_idx * dbuf_rsize;
+
+                        // initialize the record
+                        let record = BatchRecord {
+                            buffer: &ebuf[ebuf_start..(ebuf_start + rsize_u64)],
+                            dbuf: &dbuf[dbuf_start..(dbuf_start + dbuf_rsize)],
+                            id: idx as u64,
+                            config: reader.config,
+                            header_buf,
+                            header_len,
+                        };
+
+                        // process the record
+                        processor.process_record(record)?;
+                    }
+
+                    // process the batch
+                    processor.on_batch_complete()?;
+                }
 
                 Ok(())
             });
