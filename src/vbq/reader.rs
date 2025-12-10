@@ -36,17 +36,15 @@
 //! let mut block = reader.new_block();
 //!
 //! // Read records with headers and quality scores
-//! let mut seq_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
-//!         record.decode_s(&mut seq_buffer).unwrap();
+//!         let seq = record.sseq();
 //!         let header = record.sheader();
 //!         println!("Header: {}", std::str::from_utf8(header).unwrap());
-//!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
+//!         println!("Sequence: {}", std::str::from_utf8(seq).unwrap());
 //!         if !record.squal().is_empty() {
 //!             println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
 //!         }
-//!         seq_buffer.clear();
 //!     }
 //! }
 //! ```
@@ -716,6 +714,7 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 /// use binseq::vbq::MmapReader;
 /// use binseq::{BinseqRecord, Result};
 ///
+/// #[allow(deprecated)]
 /// fn main() -> Result<()> {
 ///     let path = "./data/subset.vbq";
 ///     let mut reader = MmapReader::new(path)?; // Index loaded automatically
