@@ -180,6 +180,9 @@ pub struct RecordBlock {
 
     /// Reusable zstd decompression context
     dctx: zstd_safe::DCtx<'static>,
+
+    /// Reusable decoding buffer for the block
+    dbuf: Vec<u8>,
 }
 impl RecordBlock {
     /// Creates a new empty `RecordBlock` with the specified block size
@@ -205,6 +208,7 @@ impl RecordBlock {
             records: Vec::default(),
             sequences: Vec::default(),
             rbuf: Vec::default(),
+            dbuf: Vec::default(),
             dctx: zstd_safe::DCtx::create(),
         }
     }
@@ -270,6 +274,7 @@ impl RecordBlock {
         self.index = 0;
         self.records.clear();
         self.sequences.clear();
+        self.dbuf.clear();
         // Note: We keep rbuf allocated for reuse
     }
 
@@ -438,6 +443,70 @@ impl RecordBlock {
             });
         }
     }
+
+    /// Decodes all sequences in the block at once.
+    ///
+    /// Note:
+    /// Each record's sequence is padded internally to the nearest u64.
+    /// Because of this the global decoding will include nucleotides that are not present in the original data.
+    /// We track the non-contiguous regions of the sequence separately.
+    pub fn decode_all(&mut self) -> Result<()> {
+        if self.sequences.is_empty() {
+            return Ok(());
+        }
+        self.dbuf.clear();
+        match self.bitsize {
+            BitSize::Two => {
+                let num_bp = self.sequences.len() * 32;
+                bitnuc::twobit::decode(&self.sequences, num_bp, &mut self.dbuf)
+            }
+            BitSize::Four => {
+                let num_bp = self.sequences.len() * 16;
+                bitnuc::fourbit::decode(&self.sequences, num_bp, &mut self.dbuf)
+            }
+        }?;
+        Ok(())
+    }
+
+    /// Get decoded primary sequence for a record by index
+    pub fn get_decoded_s(&self, record_idx: usize) -> Option<&[u8]> {
+        let meta = self.records.get(record_idx)?;
+        if self.dbuf.is_empty() {
+            return None;
+        }
+
+        let bases_per_word = match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
+        };
+
+        // Calculate offset in decoded buffer (accounting for padding)
+        let offset = meta.s_seq_span.offset * bases_per_word;
+        let len = meta.slen as usize;
+
+        Some(&self.dbuf[offset..offset + len])
+    }
+
+    /// Get decoded extended sequence for a record by index
+    pub fn get_decoded_x(&self, record_idx: usize) -> Option<&[u8]> {
+        let meta = self.records.get(record_idx)?;
+        if meta.xlen == 0 {
+            return Some(&[]);
+        }
+        if self.dbuf.is_empty() {
+            return None;
+        }
+
+        let bases_per_word = match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
+        };
+
+        let offset = meta.x_seq_span.offset * bases_per_word;
+        let len = meta.xlen as usize;
+
+        Some(&self.dbuf[offset..offset + len])
+    }
 }
 
 pub struct RecordBlockIter<'a> {
@@ -460,11 +529,14 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 
         let meta = &self.block.records[self.pos];
         let index = (self.block.index + self.pos) as u64;
+        let index_in_block = self.pos;
         self.pos += 1;
 
         Some(RefRecord {
+            block: self.block,
             bitsize: self.block.bitsize,
             index,
+            index_in_block,
             flag: meta.flag,
             slen: meta.slen,
             xlen: meta.xlen,
@@ -482,8 +554,10 @@ impl<'a> Iterator for RecordBlockIter<'a> {
 
 /// Zero-copy record reference
 pub struct RefRecord<'a> {
+    block: &'a RecordBlock,
     bitsize: BitSize,
     index: u64,
+    index_in_block: usize,
     flag: Option<u64>,
     slen: u64,
     xlen: u64,
@@ -548,6 +622,28 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 
     fn xqual(&self) -> &[u8] {
         self.xqual
+    }
+
+    /// Override this method since we can make use of block information
+    fn decode_s(&self, buf: &mut Vec<u8>) -> Result<()> {
+        if let Some(decoded) = self.block.get_decoded_s(self.index_in_block) {
+            buf.extend_from_slice(decoded);
+        } else {
+            self.bitsize()
+                .decode(self.sbuf(), self.slen() as usize, buf)?;
+        }
+        Ok(())
+    }
+
+    /// Override this method since we can make use of block information
+    fn decode_x(&self, buf: &mut Vec<u8>) -> Result<()> {
+        if let Some(decoded) = self.block.get_decoded_x(self.index_in_block) {
+            buf.extend_from_slice(decoded);
+        } else {
+            self.bitsize()
+                .decode(self.xbuf(), self.xlen() as usize, buf)?;
+        }
+        Ok(())
     }
 }
 
@@ -631,6 +727,9 @@ pub struct MmapReader {
 
     /// Total number of records read from the file so far
     total: usize,
+
+    /// Whether to decode sequences at once in each block
+    decode_block: bool,
 }
 impl MmapReader {
     /// Creates a new `MmapReader` for a VBINSEQ file
@@ -689,6 +788,7 @@ impl MmapReader {
             header,
             pos: SIZE_HEADER,
             total: 0,
+            decode_block: true,
         })
     }
 
@@ -712,6 +812,24 @@ impl MmapReader {
     #[must_use]
     pub fn new_block(&self) -> RecordBlock {
         RecordBlock::new(self.header.bits, self.header.block as usize)
+    }
+
+    /// Sets whether to decode sequences at once in each block
+    ///
+    /// # Arguments
+    ///
+    /// * `decode_block` - Whether to decode sequences at once in each block
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use binseq::vbq::MmapReader;
+    ///
+    /// let mut reader = MmapReader::new("example.vbq").unwrap();
+    /// reader.set_decode_block(false);
+    /// ```
+    pub fn set_decode_block(&mut self, decode_block: bool) {
+        self.decode_block = decode_block;
     }
 
     /// Returns the path where the index file would be located
@@ -1165,6 +1283,11 @@ impl ParallelReader for MmapReader {
 
                     // Update the record block index
                     record_block.update_index(block_range.cumulative_records as usize);
+
+                    // decode the data
+                    if self.decode_block {
+                        record_block.decode_all()?;
+                    }
 
                     // Process records in this block that fall within our range
                     for record in record_block.iter() {
