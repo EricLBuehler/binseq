@@ -44,16 +44,18 @@ fn read_write_single(fastq_path: &str, binseq_path: &str, seq_size: usize) -> Re
     // Read the binary sequence
     let reader = MmapReader::new(binseq_path)?;
     let mut num_records_read = 0;
+    let mut sbuf = Vec::new();
     for idx in 0..reader.num_records() {
         let record = reader.get(idx)?;
-        let seq = record.sseq();
+        record.decode_s(&mut sbuf)?;
 
         // Check if the decoded sequence matches the original
-        let buf_str = std::str::from_utf8(&seq)?;
+        let buf_str = std::str::from_utf8(&sbuf)?;
         let seq_str = std::str::from_utf8(&all_sequences[num_records_read])?;
         assert_eq!(buf_str, seq_str);
 
         num_records_read += 1;
+        sbuf.clear();
     }
     eprintln!("Finished reading {num_records_read} records (mmap)");
     eprintln!(
