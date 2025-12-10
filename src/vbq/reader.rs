@@ -37,18 +37,16 @@
 //!
 //! // Read records with headers and quality scores
 //! let mut seq_buffer = Vec::new();
-//! let mut header_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
 //!         record.decode_s(&mut seq_buffer).unwrap();
-//!         record.sheader(&mut header_buffer);
-//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
+//!         let header = record.sheader();
+//!         println!("Header: {}", std::str::from_utf8(header).unwrap());
 //!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
 //!         if !record.squal().is_empty() {
 //!             println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
 //!         }
 //!         seq_buffer.clear();
-//!         header_buffer.clear();
 //!     }
 //! }
 //! ```
@@ -710,7 +708,6 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 ///
 ///     // Create buffers for sequence data and headers
 ///     let mut seq_buffer = Vec::new();
-///     let mut header_buffer = Vec::new();
 ///     let mut block = reader.new_block();
 ///
 ///     // Read blocks sequentially
@@ -719,13 +716,12 @@ impl<'a> BinseqRecord for RefRecord<'a> {
 ///         for record in block.iter() {
 ///             // Decode sequence and header
 ///             record.decode_s(&mut seq_buffer)?;
-///             record.sheader(&mut header_buffer);
+///             let header = record.sheader();
 ///
-///             println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap_or(""));
+///             println!("Header: {}", std::str::from_utf8(&header).unwrap_or(""));
 ///             println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap_or(""));
 ///
 ///             seq_buffer.clear();
-///             header_buffer.clear();
 ///         }
 ///     }
 ///     Ok(())

@@ -129,16 +129,14 @@
 //!
 //! // Process blocks one at a time
 //! let mut seq_buffer = Vec::new();
-//! let mut header_buffer = Vec::new();
 //! while reader.read_block_into(&mut block).unwrap() {
 //!     for record in block.iter() {
 //!         record.decode_s(&mut seq_buffer).unwrap();
-//!         record.sheader(&mut header_buffer);
-//!         println!("Header: {}", std::str::from_utf8(&header_buffer).unwrap());
+//!         let header = record.sheader();
+//!         println!("Header: {}", std::str::from_utf8(header).unwrap());
 //!         println!("Sequence: {}", std::str::from_utf8(&seq_buffer).unwrap());
 //!         println!("Quality: {}", std::str::from_utf8(record.squal()).unwrap());
 //!         seq_buffer.clear();
-//!         header_buffer.clear();
 //!     }
 //! }
 //! # std::fs::remove_file("example.vbq").unwrap_or(());
