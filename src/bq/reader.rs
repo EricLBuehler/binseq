@@ -198,11 +198,21 @@ impl BinseqRecord for BatchRecord<'_> {
     }
     /// Override this method since we can make use of block information
     fn sseq(&self) -> &[u8] {
-        &self.dbuf[..self.config.slen()]
+        if self.config.flags {
+            let scalar = self.config.scalar();
+            &self.dbuf[scalar..scalar + self.config.slen()]
+        } else {
+            &self.dbuf[..self.config.slen()]
+        }
     }
     /// Override this method since we can make use of block information
     fn xseq(&self) -> &[u8] {
-        &self.dbuf[self.config.slen()..]
+        if self.config.flags {
+            let scalar = self.config.scalar();
+            &self.dbuf[scalar + self.config.slen()..]
+        } else {
+            &self.dbuf[self.config.slen()..]
+        }
     }
 }
 
@@ -331,6 +341,14 @@ impl RecordConfig {
             (self.schunk + self.xchunk + 1) as usize
         } else {
             (self.schunk + self.xchunk) as usize
+        }
+    }
+
+    /// The number of nucleotides per word
+    pub fn scalar(&self) -> usize {
+        match self.bitsize {
+            BitSize::Two => 32,
+            BitSize::Four => 16,
         }
     }
 }
@@ -831,10 +849,7 @@ impl ParallelReader for MmapReader {
                 let rsize_u64 = reader.config.record_size_bytes() / 8;
 
                 // determine the required scalar size
-                let scalar = match reader.config.bitsize {
-                    BitSize::Two => 32,
-                    BitSize::Four => 16,
-                };
+                let scalar = reader.config.scalar();
 
                 // calculate the size of a record in the batch decoded buffer
                 let mut dbuf_rsize = { (reader.config.schunk() + reader.config.xchunk()) * scalar };
