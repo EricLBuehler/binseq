@@ -70,6 +70,22 @@ pub trait BinseqRecord {
         Ok(())
     }
 
+    /// Returns a reference to the primary decoded sequence of this record.
+    ///
+    /// This is not available on all types that implement the `Record` trait.
+    /// It should be available on types that implement it in this library however.
+    fn sseq(&self) -> &[u8] {
+        unimplemented!("This record does not implement direct sequence access");
+    }
+
+    /// Returns a reference to the extended decoded sequence of this record.
+    ///
+    /// This may not be available on all types that implement the `Record` trait.
+    /// It should be available on types that implement it in this library however.
+    fn xseq(&self) -> &[u8] {
+        unimplemented!("This record does not implement direct sequence access");
+    }
+
     /// Decodes the primary sequence of this record into a newly allocated buffer.
     ///
     /// Not advised to use this function as it allocates a new buffer every time.
