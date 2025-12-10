@@ -431,9 +431,9 @@ impl RecordBlock {
                 slen,
                 xlen,
                 s_seq_span,
-                x_seq_span,
                 s_qual_span,
                 s_header_span,
+                x_seq_span,
                 x_qual_span,
                 x_header_span,
             });
@@ -465,6 +465,7 @@ impl RecordBlock {
     }
 
     /// Get decoded primary sequence for a record by index
+    #[must_use]
     pub fn get_decoded_s(&self, record_idx: usize) -> Option<&[u8]> {
         let meta = self.records.get(record_idx)?;
         if self.dbuf.is_empty() {
@@ -484,6 +485,7 @@ impl RecordBlock {
     }
 
     /// Get decoded extended sequence for a record by index
+    #[must_use]
     pub fn get_decoded_x(&self, record_idx: usize) -> Option<&[u8]> {
         let meta = self.records.get(record_idx)?;
         if meta.xlen == 0 {
@@ -586,7 +588,7 @@ pub struct RefRecord<'a> {
     header_len: usize,
 }
 
-impl<'a> BinseqRecord for RefRecord<'a> {
+impl BinseqRecord for RefRecord<'_> {
     fn bitsize(&self) -> BitSize {
         self.bitsize
     }

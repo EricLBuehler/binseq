@@ -101,9 +101,9 @@ pub trait HeaderContext {
     #[inline]
     fn fill_headers<R: BinseqRecord>(&mut self, record: &R) {
         self.clear_headers();
-        self.sheader_mut().extend_from_slice(&record.sheader());
+        self.sheader_mut().extend_from_slice(record.sheader());
         if record.is_paired() {
-            self.xheader_mut().extend_from_slice(&record.xheader());
+            self.xheader_mut().extend_from_slice(record.xheader());
         }
     }
 }

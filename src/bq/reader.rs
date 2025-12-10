@@ -144,7 +144,7 @@ pub struct BatchRecord<'a> {
     /// Length of the header in bytes
     header_len: usize,
 }
-impl<'a> BinseqRecord for BatchRecord<'a> {
+impl BinseqRecord for BatchRecord<'_> {
     fn bitsize(&self) -> BitSize {
         self.config.bitsize
     }
@@ -202,7 +202,7 @@ impl<'a> BinseqRecord for BatchRecord<'a> {
     }
     /// Override this method since we can make use of block information
     fn xseq(&self) -> &[u8] {
-        &self.dbuf[self.config.slen() as usize..]
+        &self.dbuf[self.config.slen()..]
     }
 }
 
@@ -870,12 +870,12 @@ impl ParallelReader for MmapReader {
 
                         // find the buffer starts
                         let ebuf_start = inner_idx * rsize_u64;
-                        let dbuf_start = inner_idx * dbuf_rsize as usize;
+                        let dbuf_start = inner_idx * dbuf_rsize;
 
                         // initialize the record
                         let record = BatchRecord {
                             buffer: &ebuf[ebuf_start..(ebuf_start + rsize_u64)],
-                            dbuf: &dbuf[dbuf_start..(dbuf_start + dbuf_rsize as usize)],
+                            dbuf: &dbuf[dbuf_start..(dbuf_start + dbuf_rsize)],
                             id: idx as u64,
                             config: reader.config,
                             header_buf,
