@@ -131,13 +131,18 @@ fn read_write_paired(
     let reader = MmapReader::new(binseq_path)?;
 
     let mut n_processed = 0;
+    let mut sbuf = Vec::new();
+    let mut xbuf = Vec::new();
 
     for idx in 0..reader.num_records() {
         let record = reader.get(idx)?;
 
+        record.decode_s(&mut sbuf)?;
+        record.decode_x(&mut xbuf)?;
+
         // Check if the decoded sequence matches the original
-        let s_str = std::str::from_utf8(record.sseq())?;
-        let x_str = std::str::from_utf8(record.xseq())?;
+        let s_str = std::str::from_utf8(&sbuf)?;
+        let x_str = std::str::from_utf8(&xbuf)?;
 
         let s_exp = std::str::from_utf8(&r1_storage[n_processed])?;
         let x_exp = std::str::from_utf8(&r2_storage[n_processed])?;
@@ -146,6 +151,8 @@ fn read_write_paired(
         assert_eq!(x_str, x_exp);
 
         n_processed += 1;
+        sbuf.clear();
+        xbuf.clear();
     }
     eprintln!("Finished reading {n_processed} records");
 
