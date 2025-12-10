@@ -662,6 +662,20 @@ impl<'a> BinseqRecord for RefRecord<'a> {
         }
         Ok(())
     }
+
+    /// Override this method since we can make use of block information
+    fn sseq(&self) -> &[u8] {
+        self.block
+            .get_decoded_s(self.index_in_block)
+            .expect("Reader was built without batch-decoding")
+    }
+
+    /// Override this method since we can make use of block information
+    fn xseq(&self) -> &[u8] {
+        self.block
+            .get_decoded_x(self.index_in_block)
+            .expect("Reader was built without batch-decoding")
+    }
 }
 
 /// Memory-mapped reader for VBINSEQ files

@@ -22,6 +22,7 @@ pub trait SequenceContext {
         self.xbuf_mut().clear();
     }
     #[inline]
+    #[allow(deprecated)]
     fn fill_sequences<R: BinseqRecord>(&mut self, record: &R) -> Result<()> {
         self.clear_sequences();
         record.decode_s(self.sbuf_mut())?;
