@@ -198,21 +198,25 @@ impl BinseqRecord for BatchRecord<'_> {
     }
     /// Override this method since we can make use of block information
     fn sseq(&self) -> &[u8] {
+        let scalar = self.config.scalar();
+        let mut lbound = 0;
+        let mut rbound = self.config.slen();
         if self.config.flags {
-            let scalar = self.config.scalar();
-            &self.dbuf[scalar..scalar + self.config.slen()]
-        } else {
-            &self.dbuf[..self.config.slen()]
+            lbound += scalar;
+            rbound += scalar;
         }
+        &self.dbuf[lbound..rbound]
     }
     /// Override this method since we can make use of block information
     fn xseq(&self) -> &[u8] {
+        let scalar = self.config.scalar();
+        let mut lbound = scalar * self.config.schunk();
+        let mut rbound = lbound + self.config.xlen();
         if self.config.flags {
-            let scalar = self.config.scalar();
-            &self.dbuf[scalar + self.config.slen()..]
-        } else {
-            &self.dbuf[self.config.slen()..]
+            lbound += scalar;
+            rbound += scalar;
         }
+        &self.dbuf[lbound..rbound]
     }
 }
 
