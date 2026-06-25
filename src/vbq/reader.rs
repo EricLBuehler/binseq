@@ -1345,6 +1345,9 @@ impl ParallelReader for MmapReader {
                     proc.on_batch_complete()?;
                 }
 
+                // Signal thread completion
+                proc.on_thread_complete()?;
+
                 Ok(())
             });
 

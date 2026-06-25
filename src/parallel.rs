@@ -212,6 +212,13 @@ pub trait ParallelProcessor: Send + Clone {
         Ok(())
     }
 
+    /// Called when a thread finished processing all its batches
+    /// Default implementation does nothing
+    #[allow(unused_variables)]
+    fn on_thread_complete(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     /// Set the thread ID for this processor
     ///
     /// Each thread should call this method with its own unique ID.

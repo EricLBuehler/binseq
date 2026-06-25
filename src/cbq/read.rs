@@ -318,6 +318,7 @@ impl ParallelReader for MmapReader {
                     }
                     t_proc.on_batch_complete()?;
                 }
+                t_proc.on_thread_complete()?;
                 Ok(())
             });
             handles.push(thread_handle);

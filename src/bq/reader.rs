@@ -985,6 +985,9 @@ impl ParallelReader for MmapReader {
                     processor.on_batch_complete()?;
                 }
 
+                // process the thread
+                processor.on_thread_complete()?;
+
                 Ok(())
             });
 
