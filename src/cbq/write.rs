@@ -129,33 +129,54 @@ impl<W: io::Write> ColumnarBlockWriter<W> {
         Ok(())
     }
 
-    pub fn ingest(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
+    /// Ingest only the *completed* (already-compressed) blocks from `other`.
+    ///
+    /// Unlike [`ingest`](Self::ingest), this never touches either writer's
+    /// incomplete block, so it performs no zstd compression. The work done
+    /// under a global lock is reduced to a `write_all` of pre-compressed bytes
+    /// plus a header copy — compression has already been paid for on the worker
+    /// thread when `other`'s blocks were flushed in `push`.
+    ///
+    /// `other` keeps building its incomplete block across calls; only its
+    /// completed-block buffer and headers are drained.
+    pub fn ingest_completed(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
         // Write all completed blocks from the other
         self.inner.write_all(other.inner_data())?;
-        // eprintln!(
-        //     "Wrote {} bytes from completed blocks",
-        //     other.inner_data().len()
-        // );
 
         // Take all headers from the other
         self.headers.extend_from_slice(&other.headers);
 
+        // Clear only the drained completed-block state, leaving the incomplete
+        // block intact so the worker thread can keep accumulating into it.
+        other.clear_completed_data();
+
+        Ok(())
+    }
+
+    /// Ingests only the *incomplete* (non-compressed) blocks from the `other`.
+    ///
+    /// This should not be used in isolation and should be handled from the [`ingest`](Self::ingest) API only
+    /// to avoid any mistakes.
+    ///
+    /// [`ingest_completed`](Self::ingest_completed) should always be called first.
+    fn ingest_incompleted(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
         // Attempt to ingest the incomplete block from the other
-        if self.block.can_ingest(&other.block) {
-            // eprintln!("Can ingest incomplete block");
-            self.block.take_incomplete(&other.block)?;
-
-        // Make space by flushing the current block
-        // Then ingest the incomplete block from the other
-        } else {
-            // eprintln!("Cannot ingest incomplete block");
+        if !self.block.can_ingest(&other.block) {
+            // Make space by flushing the current block
+            // Then ingest the incomplete block from the other
             self.flush()?;
-            self.block.take_incomplete(&other.block)?;
         }
+        self.block.take_incomplete(&other.block)?;
 
-        // Clear the other's inner data and offsets
-        other.clear_inner_data();
+        // clear the drained incomplete-block state
+        other.clear_incomplete_data();
 
+        Ok(())
+    }
+
+    pub fn ingest(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
+        self.ingest_completed(other)?;
+        self.ingest_incompleted(other)?;
         Ok(())
     }
 }
@@ -167,10 +188,20 @@ impl ColumnarBlockWriter<Vec<u8>> {
         &self.inner
     }
 
-    pub fn clear_inner_data(&mut self) {
+    /// Clears only the completed-block state (compressed bytes + headers),
+    /// leaving the incomplete block intact.
+    ///
+    /// Used by [`ingest_completed`](ColumnarBlockWriter::ingest_completed) so a
+    /// worker thread can keep accumulating records into its in-progress block
+    /// across batches.
+    pub fn clear_completed_data(&mut self) {
         self.inner.clear();
         self.headers.clear();
-        self.block.clear();
+    }
+
+    /// Clears the incomplete-block state
+    pub fn clear_incomplete_data(&mut self) {
+        self.block.clear()
     }
 
     /// Returns the number of bytes written to the inner data structure
