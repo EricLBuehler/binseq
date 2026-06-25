@@ -201,7 +201,7 @@ impl ColumnarBlockWriter<Vec<u8>> {
 
     /// Clears the incomplete-block state
     pub fn clear_incomplete_data(&mut self) {
-        self.block.clear()
+        self.block.clear();
     }
 
     /// Returns the number of bytes written to the inner data structure
