@@ -210,3 +210,237 @@ impl ColumnarBlockWriter<Vec<u8>> {
         self.inner.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+    use crate::{
+        BinseqRecord, SequencingRecordBuilder,
+        cbq::{BlockRange, Reader, core::FileHeaderBuilder},
+    };
+
+    /// Build a `FileHeader` for sequence-only records with the given block size.
+    fn header(block_size: usize) -> FileHeader {
+        FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(false)
+            .with_qualities(false)
+            .with_flags(false)
+            .with_block_size(block_size)
+            .build()
+    }
+
+    /// Build a sequence-only record from a sequence slice.
+    fn record(seq: &[u8]) -> SequencingRecord<'_> {
+        SequencingRecordBuilder::default()
+            .s_seq(seq)
+            .build()
+            .expect("failed to build record")
+    }
+
+    /// Read every sequence back from a finished CBQ byte buffer.
+    fn read_all_sequences(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+        let mut reader = Reader::new(Cursor::new(bytes)).expect("failed to open reader");
+        let mut out = Vec::new();
+        let mut cumulative = 0u64;
+        while let Some(block_header) = reader.read_block().expect("failed to read block") {
+            cumulative += block_header.num_records;
+            // `read_block` only loads the compressed columns; decode them before iterating.
+            reader
+                .block
+                .decompress_columns()
+                .expect("failed to decompress block");
+            let range = BlockRange::new(0, cumulative);
+            for rec in reader.block.iter_records(range) {
+                out.push(rec.sseq().to_vec());
+            }
+        }
+        out
+    }
+
+    /// 64 distinct fixed-length sequences (each unique by index).
+    fn sample_sequences() -> Vec<Vec<u8>> {
+        const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+        (0..64u32)
+            .map(|i| {
+                (0..40)
+                    .map(|j| BASES[(i as usize + j) % 4])
+                    .collect::<Vec<u8>>()
+            })
+            .collect()
+    }
+
+    /// `ingest_completed` must leave the source's incomplete block untouched
+    /// while draining its completed blocks and headers.
+    #[test]
+    fn test_ingest_completed_preserves_incomplete_block() -> Result<()> {
+        // Small block size so a handful of records fills multiple blocks.
+        let block_size = 64;
+        let mut global = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+        let mut local = ColumnarBlockWriter::new_headless(Vec::new(), header(block_size))?;
+
+        // Push enough records to flush several completed blocks plus a partial tail.
+        let seqs = sample_sequences();
+        for seq in &seqs {
+            local.push(record(seq))?;
+        }
+
+        // There must be both completed blocks (compressed bytes) and an
+        // in-progress incomplete block at this point.
+        assert!(
+            !local.inner_data().is_empty(),
+            "expected completed blocks before ingest_completed"
+        );
+        assert!(
+            local.block.num_records > 0,
+            "expected a non-empty incomplete block before ingest_completed"
+        );
+
+        let incomplete_records_before = local.block.num_records;
+        let completed_headers = local.headers.len();
+
+        global.ingest_completed(&mut local)?;
+
+        // The completed-block buffer and headers are drained from the source...
+        assert!(
+            local.inner_data().is_empty(),
+            "completed bytes should be drained"
+        );
+        assert!(local.headers.is_empty(), "headers should be drained");
+
+        // ...but the incomplete block is left intact for further accumulation.
+        assert_eq!(
+            local.block.num_records, incomplete_records_before,
+            "incomplete block must be preserved across ingest_completed"
+        );
+
+        // The global writer received exactly the completed headers (no flush of
+        // its own empty incomplete block).
+        assert_eq!(global.headers.len(), completed_headers);
+        assert_eq!(
+            global.block.num_records, 0,
+            "ingest_completed must not touch the global incomplete block"
+        );
+
+        Ok(())
+    }
+
+    /// The parallel pattern (`ingest_completed` per batch, then a final full
+    /// `ingest`) must round-trip every record in order.
+    #[test]
+    fn test_batched_ingest_completed_then_finish_roundtrips() -> Result<()> {
+        let block_size = 64;
+        let mut global = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+        let mut local = ColumnarBlockWriter::new_headless(Vec::new(), header(block_size))?;
+
+        let seqs = sample_sequences();
+
+        // Simulate batches: push a chunk, drain completed blocks, repeat.
+        for chunk in seqs.chunks(7) {
+            for seq in chunk {
+                local.push(record(seq))?;
+            }
+            global.ingest_completed(&mut local)?;
+        }
+
+        // Final thread completion: drain the residual incomplete block.
+        global.ingest(&mut local)?;
+        global.finish()?;
+
+        // The source has been fully drained.
+        assert!(local.inner_data().is_empty());
+        assert_eq!(local.block.num_records, 0);
+
+        let read_back = read_all_sequences(global.inner);
+        assert_eq!(read_back, seqs, "round-trip mismatch after batched ingest");
+
+        Ok(())
+    }
+
+    /// A single full `ingest` (no prior `ingest_completed`) must round-trip.
+    #[test]
+    fn test_full_ingest_roundtrips() -> Result<()> {
+        let block_size = 64;
+        let mut global = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+        let mut local = ColumnarBlockWriter::new_headless(Vec::new(), header(block_size))?;
+
+        let seqs = sample_sequences();
+        for seq in &seqs {
+            local.push(record(seq))?;
+        }
+
+        global.ingest(&mut local)?;
+        global.finish()?;
+
+        let read_back = read_all_sequences(global.inner);
+        assert_eq!(read_back, seqs);
+
+        Ok(())
+    }
+
+    /// Multiple local writers draining into one global writer (as distinct
+    /// threads would) must preserve every record without loss or duplication.
+    ///
+    /// Note: input *order* is not preserved across independent locals. When one
+    /// local's full `ingest` leaves a tail in the global incomplete block, a
+    /// later local's `ingest_completed` writes its completed blocks ahead of
+    /// that buffered tail. The guarantee is multiset equality, not sequence
+    /// equality — which matches real parallel writing, where threads merge into
+    /// the global in lock-acquisition order rather than input order.
+    #[test]
+    fn test_multiple_locals_ingest_into_global() -> Result<()> {
+        let block_size = 64;
+        let mut global = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+
+        let seqs = sample_sequences();
+        let mut expected = Vec::new();
+
+        // Three "threads", each owning a third of the records.
+        for group in seqs.chunks(seqs.len().div_ceil(3)) {
+            let mut local = ColumnarBlockWriter::new_headless(Vec::new(), header(block_size))?;
+            for seq in group {
+                local.push(record(seq))?;
+                expected.push(seq.clone());
+            }
+            // per-batch drain followed by a thread-final full ingest
+            global.ingest_completed(&mut local)?;
+            global.ingest(&mut local)?;
+        }
+
+        global.finish()?;
+
+        let mut read_back = read_all_sequences(global.inner);
+        read_back.sort();
+        expected.sort();
+        assert_eq!(read_back, expected, "records lost or duplicated on merge");
+
+        Ok(())
+    }
+
+    /// `ingest_completed` on a source with no completed blocks is a no-op for
+    /// the global writer and preserves the source's incomplete block.
+    #[test]
+    fn test_ingest_completed_no_completed_blocks() -> Result<()> {
+        // Large block size so a few small records never fill a block.
+        let block_size = 1 << 20;
+        let mut global = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+        let mut local = ColumnarBlockWriter::new_headless(Vec::new(), header(block_size))?;
+
+        local.push(record(b"ACGTACGTACGT"))?;
+        assert!(
+            local.inner_data().is_empty(),
+            "no block should have flushed"
+        );
+
+        let records_before = local.block.num_records;
+        global.ingest_completed(&mut local)?;
+
+        assert_eq!(local.block.num_records, records_before);
+        assert!(global.headers.is_empty());
+        assert_eq!(global.block.num_records, 0);
+
+        Ok(())
+    }
+}
