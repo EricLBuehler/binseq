@@ -162,6 +162,18 @@ impl<Rf: paraseq::Record> ParallelProcessor<Rf> for Encoder {
         Ok(())
     }
     fn on_batch_complete(&mut self) -> paraseq::Result<()> {
+        // Drain only the already-compressed completed blocks under the lock.
+        // The incomplete block keeps accumulating on this thread, and its
+        // compression happens off-lock when it next fills up in `push`.
+        self.writer
+            .lock()
+            .ingest_completed(&mut self.thread_writer)
+            .map_err(IntoProcessError::into_process_error)?;
+        Ok(())
+    }
+
+    fn on_thread_complete(&mut self) -> paraseq::Result<()> {
+        // Flush this thread's residual incomplete block into the global writer.
         self.writer
             .lock()
             .ingest(&mut self.thread_writer)
@@ -191,6 +203,18 @@ impl<Rf: paraseq::Record> PairedParallelProcessor<Rf> for Encoder {
     }
 
     fn on_batch_complete(&mut self) -> paraseq::Result<()> {
+        // Drain only the already-compressed completed blocks under the lock.
+        // The incomplete block keeps accumulating on this thread, and its
+        // compression happens off-lock when it next fills up in `push`.
+        self.writer
+            .lock()
+            .ingest_completed(&mut self.thread_writer)
+            .map_err(IntoProcessError::into_process_error)?;
+        Ok(())
+    }
+
+    fn on_thread_complete(&mut self) -> paraseq::Result<()> {
+        // Flush this thread's residual incomplete block into the global writer.
         self.writer
             .lock()
             .ingest(&mut self.thread_writer)

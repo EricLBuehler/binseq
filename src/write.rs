@@ -566,6 +566,28 @@ impl<W: Write> BinseqWriter<W> {
             _ => Err(WriteError::FormatMismatch.into()),
         }
     }
+
+    /// Ingest *completed* records from a headless `Vec<u8>` writer into this writer
+    ///
+    /// This is used in parallel writing scenarios where thread-local writers
+    /// buffer to `Vec<u8>` and then get merged into a global writer.
+    ///
+    /// Currently only different for CBQ
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The source and destination writers have different formats
+    /// - The source and destination writers have incompatible headers
+    /// - There's an I/O error during ingestion
+    pub fn ingest_completed(&mut self, other: &mut BinseqWriter<Vec<u8>>) -> Result<()> {
+        match (self, other) {
+            (Self::Bq(dst), BinseqWriter::Bq(src)) => dst.ingest(src),
+            (Self::Vbq(dst), BinseqWriter::Vbq(src)) => dst.ingest(src),
+            (Self::Cbq(dst), BinseqWriter::Cbq(src)) => dst.ingest_completed(src),
+            _ => Err(WriteError::FormatMismatch.into()),
+        }
+    }
 }
 
 impl<W: Write> BinseqWriter<W> {
