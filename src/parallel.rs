@@ -10,25 +10,30 @@ use crate::{
 /// An enum abstraction for BINSEQ readers that can process records in parallel
 ///
 /// This is a convenience enum that can be used for general workflows where the
-/// distinction between BQ and VBQ readers is not important.
+/// distinction between BINSEQ readers is not important.
 ///
-/// For more specialized workflows see [`bq::MmapReader`] and [`vbq::MmapReader`].
+/// For more specialized workflows see [`bq::MmapReader`], [`vbq::MmapReader`], and [`cbq::MmapReader`].
 pub enum BinseqReader {
     Bq(bq::MmapReader),
     Vbq(vbq::MmapReader),
     Cbq(cbq::MmapReader),
 }
 impl BinseqReader {
-    pub fn new(path: &str) -> Result<Self> {
-        let pathbuf = Path::new(path);
-        match pathbuf.extension() {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        match path.as_ref().extension() {
             Some(ext) => match ext.to_str() {
                 Some("bq") => Ok(Self::Bq(bq::MmapReader::new(path)?)),
                 Some("vbq") => Ok(Self::Vbq(vbq::MmapReader::new(path)?)),
                 Some("cbq") => Ok(Self::Cbq(cbq::MmapReader::new(path)?)),
-                _ => Err(ExtensionError::UnsupportedExtension(path.to_string()).into()),
+                _ => Err(ExtensionError::UnsupportedExtension(
+                    path.as_ref().to_string_lossy().to_string(),
+                )
+                .into()),
             },
-            None => Err(ExtensionError::UnsupportedExtension(path.to_string()).into()),
+            None => Err(ExtensionError::UnsupportedExtension(
+                path.as_ref().to_string_lossy().to_string(),
+            )
+            .into()),
         }
     }
 
