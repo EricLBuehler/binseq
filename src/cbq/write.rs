@@ -140,6 +140,10 @@ impl<W: io::Write> ColumnarBlockWriter<W> {
     /// `other` keeps building its incomplete block across calls; only its
     /// completed-block buffer and headers are drained.
     pub fn ingest_completed(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
+        if other.headers.is_empty() {
+            return Ok(()); // short-circuit
+        }
+
         // Write all completed blocks from the other
         self.inner.write_all(other.inner_data())?;
 
@@ -160,6 +164,10 @@ impl<W: io::Write> ColumnarBlockWriter<W> {
     ///
     /// [`ingest_completed`](Self::ingest_completed) should always be called first.
     fn ingest_incompleted(&mut self, other: &mut ColumnarBlockWriter<Vec<u8>>) -> Result<()> {
+        if other.block.num_records == 0 {
+            return Ok(()); // short-circuit
+        }
+
         // Attempt to ingest the incomplete block from the other
         if !self.block.can_ingest(&other.block) {
             // Make space by flushing the current block
