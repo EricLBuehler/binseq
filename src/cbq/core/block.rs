@@ -432,6 +432,11 @@ impl ColumnarBlock {
     }
 
     /// Decompress all columns back to native representation
+    ///
+    /// Note: `resize` can be only be used with `copy_decode` if passing
+    /// as `&mut [T]`. Passing a resized `&mut Vec<T>` will lead to an
+    /// append operation, not an overwrite. If passing `&mut Vec<T>`, the
+    /// `Vec` will be resized automatically by `copy_decode`.
     pub fn decompress_columns(&mut self) -> Result<()> {
         // decompress sequence lengths
         {
@@ -450,7 +455,7 @@ impl ColumnarBlock {
 
         // decompress npos
         if !self.z_npos.is_empty() {
-            self.ef_bytes.resize(self.len_nef, 0);
+            self.ef_bytes.reserve(self.len_nef);
             copy_decode(self.z_npos.as_slice(), &mut self.ef_bytes)?;
 
             let ef = EliasFano::deserialize_from(self.ef_bytes.as_slice())?;
