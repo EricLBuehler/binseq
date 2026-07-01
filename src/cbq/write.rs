@@ -427,6 +427,54 @@ mod tests {
         Ok(())
     }
 
+    /// Sequences containing `N`s, which drive the Elias-Fano `npos` column.
+    /// Blocks with no `N`s at all never populate `z_npos`, so a suite built
+    /// only from `sample_sequences` (all ACGT) never exercises this path.
+    fn sample_sequences_with_n(n_seq: usize, seq_len: usize) -> Vec<Vec<u8>> {
+        const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+        (0..n_seq)
+            .map(|i| {
+                (0..seq_len)
+                    .map(|j| {
+                        if i % 5 == 0 {
+                            b'N'
+                        } else {
+                            BASES[(i as usize + j) % 4]
+                        }
+                    })
+                    .collect::<Vec<u8>>()
+            })
+            .collect()
+    }
+
+    /// Round-trips sequences containing `N`s through a `ColumnarBlockWriter`
+    /// and back through a `Reader`, exercising the Elias-Fano `npos`
+    /// decompression path in [`ColumnarBlock::decompress_columns`].
+    #[test]
+    fn test_roundtrip_sequences_with_n() -> Result<()> {
+        // Small block size so N-bearing sequences span multiple blocks.
+        let block_size = 256;
+        let mut writer = ColumnarBlockWriter::new(Vec::new(), header(block_size))?;
+
+        let seqs = sample_sequences_with_n(1024, 100);
+        assert!(
+            seqs.iter().any(|s| s.contains(&b'N')),
+            "test fixture must actually contain N's to exercise npos"
+        );
+        for seq in &seqs {
+            writer.push(record(seq))?;
+        }
+        writer.finish()?;
+
+        let read_back = read_all_sequences(writer.inner);
+        assert_eq!(
+            read_back, seqs,
+            "round-trip mismatch for N-bearing sequences"
+        );
+
+        Ok(())
+    }
+
     /// `ingest_completed` on a source with no completed blocks is a no-op for
     /// the global writer and preserves the source's incomplete block.
     #[test]
