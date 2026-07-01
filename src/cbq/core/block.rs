@@ -112,6 +112,7 @@ impl ColumnarBlock {
             self.num_records = 0;
             self.current_size = 0;
             self.num_npos = 0;
+            self.len_nef = 0;
         }
 
         // clear spans
