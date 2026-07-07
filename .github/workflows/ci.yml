@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Build
         run: cargo build --verbose
       - name: Run tests
@@ -23,7 +23,7 @@ jobs:
   fmt_lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Formatting
         run: cargo fmt --check
       - name: Linting
@@ -35,7 +35,7 @@ jobs:
       matrix:
         ext: [bq, vbq, cbq]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: run example ${{ matrix.ext }}
         run: cargo run --release --example grep -- ./data/subset.${{ matrix.ext }} "ACGTACGT"
 
@@ -45,7 +45,7 @@ jobs:
       matrix:
         ext: [bq, vbq, cbq]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: run example ${{ matrix.ext }}
         run: cargo run --release --example parallel_range -- ./data/subset.${{ matrix.ext }} 4 30 200
 
@@ -55,7 +55,7 @@ jobs:
       matrix:
         ext: [bq, vbq, cbq]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: run example (single) ${{ matrix.ext }}
         run: cargo run --release --example write -- ./data/subset_R1.fastq.gz -o ./output.${{ matrix.ext }}
       - name: run example (paired) ${{ matrix.ext }}
@@ -67,6 +67,6 @@ jobs:
       matrix:
         ext: [bq, vbq, cbq]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: run example ${{ matrix.ext }}
         run: cargo run --release --example read -- ./data/subset.${{ matrix.ext }}
