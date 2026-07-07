@@ -114,3 +114,158 @@ pub trait BinseqRecord {
         !self.squal().is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal implementation exercising only the trait's required methods,
+    /// so that the default-method implementations get covered.
+    struct MockRecord {
+        bitsize: BitSize,
+        index: u64,
+        flag: Option<u64>,
+        sbuf: Vec<u64>,
+        xbuf: Vec<u64>,
+        slen: u64,
+        xlen: u64,
+        squal: Vec<u8>,
+    }
+
+    impl BinseqRecord for MockRecord {
+        fn bitsize(&self) -> BitSize {
+            self.bitsize
+        }
+        fn index(&self) -> u64 {
+            self.index
+        }
+        fn flag(&self) -> Option<u64> {
+            self.flag
+        }
+        fn sheader(&self) -> &[u8] {
+            b"seq_header"
+        }
+        fn xheader(&self) -> &[u8] {
+            b""
+        }
+        fn slen(&self) -> u64 {
+            self.slen
+        }
+        fn xlen(&self) -> u64 {
+            self.xlen
+        }
+        fn sbuf(&self) -> &[u64] {
+            &self.sbuf
+        }
+        fn xbuf(&self) -> &[u64] {
+            &self.xbuf
+        }
+        fn squal(&self) -> &[u8] {
+            &self.squal
+        }
+    }
+
+    fn unpaired_record() -> MockRecord {
+        let seq = b"ACGTACGTAC";
+        let mut sbuf = Vec::new();
+        BitSize::Two.encode(seq, &mut sbuf).unwrap();
+        MockRecord {
+            bitsize: BitSize::Two,
+            index: 7,
+            flag: Some(3),
+            sbuf,
+            xbuf: Vec::new(),
+            slen: seq.len() as u64,
+            xlen: 0,
+            squal: Vec::new(),
+        }
+    }
+
+    fn paired_record() -> MockRecord {
+        let sseq = b"ACGTACGTAC";
+        let xseq = b"TTGGCCAATT";
+        let mut sbuf = Vec::new();
+        let mut xbuf = Vec::new();
+        BitSize::Two.encode(sseq, &mut sbuf).unwrap();
+        BitSize::Two.encode(xseq, &mut xbuf).unwrap();
+        MockRecord {
+            bitsize: BitSize::Two,
+            index: 1,
+            flag: None,
+            sbuf,
+            xbuf,
+            slen: sseq.len() as u64,
+            xlen: xseq.len() as u64,
+            squal: vec![b'I'; sseq.len()],
+        }
+    }
+
+    #[test]
+    fn test_default_index_and_flag() {
+        let record = unpaired_record();
+        assert_eq!(record.index(), 7);
+        assert_eq!(record.flag(), Some(3));
+    }
+
+    #[test]
+    fn test_decode_s() {
+        let record = unpaired_record();
+        let mut buf = Vec::new();
+        record.decode_s(&mut buf).unwrap();
+        assert_eq!(buf, b"ACGTACGTAC");
+    }
+
+    #[test]
+    fn test_decode_x() {
+        let record = paired_record();
+        let mut buf = Vec::new();
+        record.decode_x(&mut buf).unwrap();
+        assert_eq!(buf, b"TTGGCCAATT");
+    }
+
+    #[test]
+    fn test_decode_s_alloc() {
+        let record = unpaired_record();
+        let buf = record.decode_s_alloc().unwrap();
+        assert_eq!(buf, b"ACGTACGTAC");
+    }
+
+    #[test]
+    fn test_decode_x_alloc() {
+        let record = paired_record();
+        let buf = record.decode_x_alloc().unwrap();
+        assert_eq!(buf, b"TTGGCCAATT");
+    }
+
+    #[test]
+    #[should_panic(expected = "does not implement direct sequence access")]
+    fn test_sseq_default_panics() {
+        let record = unpaired_record();
+        let _ = record.sseq();
+    }
+
+    #[test]
+    #[should_panic(expected = "does not implement direct sequence access")]
+    fn test_xseq_default_panics() {
+        let record = unpaired_record();
+        let _ = record.xseq();
+    }
+
+    #[test]
+    fn test_is_paired() {
+        assert!(!unpaired_record().is_paired());
+        assert!(paired_record().is_paired());
+    }
+
+    #[test]
+    fn test_has_quality() {
+        assert!(!unpaired_record().has_quality());
+        assert!(paired_record().has_quality());
+    }
+
+    #[test]
+    fn test_default_xqual_is_empty() {
+        let record = unpaired_record();
+        assert!(record.xqual().is_empty());
+    }
+}

@@ -30,18 +30,18 @@ impl ParallelProcessor for RangeProcessor {
         let count = self.counter.fetch_add(1, Ordering::Relaxed);
 
         // Print progress every 10,000 records
-        if count % 10_000 == 0 {
-            if let Some(tid) = self.tid {
-                println!(
-                    "Thread {}: Processed {} records (Range: {}-{}, Index: {}, Len: {})",
-                    tid,
-                    count + 1,
-                    self.range_start,
-                    self.range_end,
-                    record.index(),
-                    record.sseq().len(),
-                );
-            }
+        if count.is_multiple_of(10_000)
+            && let Some(tid) = self.tid
+        {
+            println!(
+                "Thread {}: Processed {} records (Range: {}-{}, Index: {}, Len: {})",
+                tid,
+                count + 1,
+                self.range_start,
+                self.range_end,
+                record.index(),
+                record.sseq().len(),
+            );
         }
 
         Ok(())

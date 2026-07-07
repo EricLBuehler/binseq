@@ -1389,9 +1389,8 @@ mod tests {
     #[test]
     fn test_mmap_reader_is_paired() {
         let reader = MmapReader::new(TEST_VBQ_FILE).unwrap();
-        let is_paired = reader.is_paired();
-        // Test that the method returns a boolean
-        assert!(is_paired || !is_paired);
+        // The fixture file contains paired records
+        assert!(reader.is_paired());
     }
 
     #[test]
@@ -1399,7 +1398,7 @@ mod tests {
         let reader = MmapReader::new(TEST_VBQ_FILE).unwrap();
         let header = &reader.header;
         assert!(header.block > 0, "Expected non-zero block size");
-        assert_eq!(header.magic, 0x51455356, "Expected VSEQ magic number");
+        assert_eq!(header.magic, 0x5145_5356, "Expected VSEQ magic number");
     }
 
     // ==================== RecordBlock Tests ====================

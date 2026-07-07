@@ -446,6 +446,7 @@ impl<W: Write> Writer<W> {
     }
 
     #[deprecated(note = "use `push` method with SequencingRecord instead")]
+    #[allow(clippy::too_many_arguments)]
     pub fn write_paired_record(
         &mut self,
         flag: Option<u64>,

@@ -964,3 +964,501 @@ impl BinseqRecord for RefRecord<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Error;
+    use crate::SequencingRecordBuilder;
+    use crate::cbq::core::FileHeaderBuilder;
+    use zstd::zstd_safe;
+
+    fn full_header(block_size: usize) -> FileHeader {
+        FileHeaderBuilder::default()
+            .is_paired(true)
+            .with_headers(true)
+            .with_qualities(true)
+            .with_flags(true)
+            .with_block_size(block_size)
+            .build()
+    }
+
+    fn unpaired_header(block_size: usize) -> FileHeader {
+        FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(false)
+            .with_qualities(false)
+            .with_flags(false)
+            .with_block_size(block_size)
+            .build()
+    }
+
+    fn full_record<'a>(
+        s_seq: &'a [u8],
+        x_seq: &'a [u8],
+        s_qual: &'a [u8],
+        x_qual: &'a [u8],
+    ) -> SequencingRecord<'a> {
+        SequencingRecordBuilder::default()
+            .s_seq(s_seq)
+            .x_seq(x_seq)
+            .s_header(b"read1")
+            .x_header(b"read2")
+            .s_qual(s_qual)
+            .x_qual(x_qual)
+            .flag(42)
+            .build()
+            .unwrap()
+    }
+
+    // ==================== push()/validate_record() error paths ====================
+
+    #[test]
+    fn test_push_record_size_exceeds_block() {
+        let mut block = ColumnarBlock::new(unpaired_header(4));
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGTACGT")
+            .build()
+            .unwrap();
+        let result = block.push(record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(
+                WriteError::RecordSizeExceedsMaximumBlockSize(_, _)
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_push_block_full() {
+        // Block fits exactly one 8-byte-encoded record (32bp -> 1 word == 8 bytes)
+        let mut block = ColumnarBlock::new(unpaired_header(8));
+        let seq = vec![b'A'; 32];
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let result = block.push(
+            SequencingRecordBuilder::default()
+                .s_seq(&seq)
+                .build()
+                .unwrap(),
+        );
+        assert!(matches!(
+            result,
+            Err(Error::CbqError(CbqError::BlockFull { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_push_paired_mismatch() {
+        let mut block = ColumnarBlock::new(full_header(1 << 16));
+        // Full header requires paired, flags, headers, and qualities but this
+        // record is missing all of them.
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.push(record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "paired",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_push_headers_mismatch() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(true)
+            .with_qualities(false)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.push(record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "headers",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_push_qualities_mismatch() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(false)
+            .with_qualities(true)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.push(record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "qualities",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_usage() {
+        let mut block = ColumnarBlock::new(unpaired_header(1 << 16));
+        assert!(block.usage().abs() < f64::EPSILON);
+        let seq = vec![b'A'; 32];
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(block.usage() > 0.0);
+    }
+
+    // ==================== Internal error paths (direct private-method calls) ====================
+
+    #[test]
+    fn test_add_sequence_missing_xseq() {
+        let mut block = ColumnarBlock::new(full_header(1 << 16));
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.add_sequence(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "x_seq",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_add_flag_missing() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(false)
+            .with_qualities(false)
+            .with_flags(true)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.add_flag(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "flag",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_add_headers_missing_sheader() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(true)
+            .with_qualities(false)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.add_headers(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "s_header",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_add_headers_missing_xheader() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(true)
+            .with_headers(true)
+            .with_qualities(false)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .s_header(b"read1")
+            .build()
+            .unwrap();
+        let result = block.add_headers(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "x_header",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_add_quality_missing_squal() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(false)
+            .with_headers(false)
+            .with_qualities(true)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .build()
+            .unwrap();
+        let result = block.add_quality(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "s_qual",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_add_quality_missing_xqual() {
+        let header = FileHeaderBuilder::default()
+            .is_paired(true)
+            .with_headers(false)
+            .with_qualities(true)
+            .with_flags(false)
+            .with_block_size(1 << 16)
+            .build();
+        let mut block = ColumnarBlock::new(header);
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .s_qual(b"IIII")
+            .build()
+            .unwrap();
+        let result = block.add_quality(&record);
+        assert!(matches!(
+            result,
+            Err(Error::WriteError(WriteError::ConfigurationMismatch {
+                attribute: "x_qual",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn test_take_incomplete_cannot_ingest() {
+        let mut block = ColumnarBlock::new(unpaired_header(8));
+        let seq = vec![b'A'; 32];
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let mut other = ColumnarBlock::new(unpaired_header(8));
+        other
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let result = block.take_incomplete(&other);
+        assert!(matches!(
+            result,
+            Err(Error::CbqError(CbqError::CannotIngestBlock { .. }))
+        ));
+    }
+
+    // ==================== Full round-trip through streaming (read_from/decompress_columns) ====================
+
+    #[test]
+    fn test_full_feature_roundtrip_streaming() {
+        let s_seq = b"ACGTNACGT";
+        let x_seq = b"TTGGNCCAA";
+        let s_qual = vec![b'I'; s_seq.len()];
+        let x_qual = vec![b'J'; x_seq.len()];
+
+        let header = full_header(1 << 16);
+        let mut block = ColumnarBlock::new(header);
+        block
+            .push(full_record(s_seq, x_seq, &s_qual, &x_qual))
+            .unwrap();
+
+        let mut cctx = zstd_safe::CCtx::create();
+        let mut buffer = Vec::new();
+        let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
+
+        // Stream the compressed columns back through `read_from` + `decompress_columns`,
+        // matching what the streaming `Reader` does.
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut reader_block = ColumnarBlock::new(header);
+        reader_block.read_from(&mut cursor, block_header).unwrap();
+        reader_block.decompress_columns().unwrap();
+
+        let range = BlockRange::new(0, block_header.num_records);
+        let rec = reader_block.iter_records(range).next().unwrap();
+
+        assert_eq!(rec.flag(), Some(42));
+        assert_eq!(rec.sheader(), b"read1");
+        assert_eq!(rec.xheader(), b"read2");
+        assert!(rec.is_paired());
+        assert!(rec.has_quality());
+        assert_eq!(rec.squal(), s_qual.as_slice());
+        assert_eq!(rec.xqual(), x_qual.as_slice());
+
+        let mut sbuf = Vec::new();
+        rec.decode_s(&mut sbuf).unwrap();
+        assert_eq!(sbuf, s_seq);
+
+        let mut xbuf = Vec::new();
+        rec.decode_x(&mut xbuf).unwrap();
+        assert_eq!(xbuf, x_seq);
+    }
+
+    // ==================== Full round-trip through decompress_from_bytes (mmap path) ====================
+
+    #[test]
+    fn test_full_feature_roundtrip_from_bytes() {
+        let s_seq = b"ACGTNACGT";
+        let x_seq = b"TTGGNCCAA";
+        let s_qual = vec![b'I'; s_seq.len()];
+        let x_qual = vec![b'J'; x_seq.len()];
+
+        let header = full_header(1 << 16);
+        let mut block = ColumnarBlock::new(header);
+        block
+            .push(full_record(s_seq, x_seq, &s_qual, &x_qual))
+            .unwrap();
+
+        let mut cctx = zstd_safe::CCtx::create();
+        let mut buffer = Vec::new();
+        let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
+
+        // Skip the serialized block header - `decompress_from_bytes` expects
+        // only the compressed column bytes, matching `MmapReader::load_block`.
+        let column_bytes = &buffer[std::mem::size_of::<BlockHeader>()..];
+
+        let mut dctx = zstd_safe::DCtx::create();
+        let mut reader_block = ColumnarBlock::new(header);
+        reader_block
+            .decompress_from_bytes(column_bytes, block_header, &mut dctx)
+            .unwrap();
+
+        let range = BlockRange::new(0, block_header.num_records);
+        let rec = reader_block.iter_records(range).next().unwrap();
+
+        assert_eq!(rec.flag(), Some(42));
+        assert_eq!(rec.sheader(), b"read1");
+        assert_eq!(rec.xheader(), b"read2");
+        assert!(rec.is_paired());
+        assert!(rec.has_quality());
+        assert_eq!(rec.squal(), s_qual.as_slice());
+        assert_eq!(rec.xqual(), x_qual.as_slice());
+        assert_eq!(rec.sseq(), s_seq);
+        assert_eq!(rec.xseq(), x_seq);
+    }
+
+    // ==================== Default header fallback (no headers stored) ====================
+
+    #[test]
+    fn test_default_header_fallback_uses_record_index() {
+        let header = unpaired_header(1 << 16);
+        let mut block = ColumnarBlock::new(header);
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(b"ACGT")
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let mut cctx = zstd_safe::CCtx::create();
+        let mut buffer = Vec::new();
+        let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
+
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut reader_block = ColumnarBlock::new(header);
+        reader_block.read_from(&mut cursor, block_header).unwrap();
+        reader_block.decompress_columns().unwrap();
+
+        let range = BlockRange::new(0, block_header.num_records);
+        let rec = reader_block.iter_records(range).next().unwrap();
+        assert_eq!(rec.sheader(), b"0");
+        assert_eq!(rec.xheader(), b"0");
+        assert!(!rec.is_paired());
+        assert!(!rec.has_quality());
+        assert_eq!(rec.flag(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "sbuf is not implemented for cbq")]
+    fn test_sbuf_unimplemented() {
+        let header = unpaired_header(1 << 16);
+        let mut block = ColumnarBlock::new(header);
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(b"ACGT")
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let mut cctx = zstd_safe::CCtx::create();
+        let mut buffer = Vec::new();
+        let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
+
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut reader_block = ColumnarBlock::new(header);
+        reader_block.read_from(&mut cursor, block_header).unwrap();
+        reader_block.decompress_columns().unwrap();
+
+        let range = BlockRange::new(0, block_header.num_records);
+        let rec = reader_block.iter_records(range).next().unwrap();
+        let _ = rec.sbuf();
+    }
+}
