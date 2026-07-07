@@ -41,4 +41,7 @@ paraseq = ["dep:paraseq", "dep:parking_lot"]
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
 missing_errors_doc = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
