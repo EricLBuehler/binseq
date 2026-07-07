@@ -810,12 +810,7 @@ impl<R: Read> StreamReader<R> {
         // buffer position since `fill_buffer` may have shifted the buffer
         let id = self.records_read;
         self.records_read += 1;
-        Some(Ok(RefRecord::new(
-            id,
-            record_u64s,
-            &self.qbuf,
-            config,
-        )))
+        Some(Ok(RefRecord::new(id, record_u64s, &self.qbuf, config)))
     }
 
     /// Consumes the stream reader and returns the inner reader
@@ -1361,7 +1356,10 @@ mod tests {
 
         let path = "test_truncated_reader.bq";
         {
-            let header = crate::bq::FileHeaderBuilder::new().slen(64).build().unwrap();
+            let header = crate::bq::FileHeaderBuilder::new()
+                .slen(64)
+                .build()
+                .unwrap();
             let mut file = std::fs::File::create(path).unwrap();
             header.write_bytes(&mut file).unwrap();
             // Write a partial record (not a full multiple of the record size)

@@ -915,9 +915,7 @@ mod testing {
     fn test_encoder_encode_paired_invalid_ignored() {
         let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
         let mut encoder = Encoder::with_policy(header, Policy::IgnoreSequence);
-        let result = encoder
-            .encode_paired(b"ACGTNNNN", b"ACGTACGT")
-            .unwrap();
+        let result = encoder.encode_paired(b"ACGTNNNN", b"ACGTACGT").unwrap();
         assert!(result.is_none());
     }
 
@@ -925,9 +923,7 @@ mod testing {
     fn test_encoder_encode_paired_invalid_corrected() {
         let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
         let mut encoder = Encoder::with_policy(header, Policy::SetToA);
-        let result = encoder
-            .encode_paired(b"ACGTNNNN", b"NNNNACGT")
-            .unwrap();
+        let result = encoder.encode_paired(b"ACGTNNNN", b"NNNNACGT").unwrap();
         assert!(result.is_some());
     }
 
@@ -967,7 +963,13 @@ mod testing {
     #[allow(deprecated)]
     fn test_write_paired_record_deprecated() -> Result<()> {
         let mut writer = WriterBuilder::default()
-            .header(FileHeaderBuilder::new().slen(8).xlen(8).flags(true).build()?)
+            .header(
+                FileHeaderBuilder::new()
+                    .slen(8)
+                    .xlen(8)
+                    .flags(true)
+                    .build()?,
+            )
             .build(Vec::new())?;
         let wrote = writer.write_paired_record(Some(5), b"ACGTACGT", b"TTGGCCAA")?;
         assert!(wrote);

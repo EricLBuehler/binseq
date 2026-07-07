@@ -1034,10 +1034,21 @@ mod tests {
         // Block fits exactly one 8-byte-encoded record (32bp -> 1 word == 8 bytes)
         let mut block = ColumnarBlock::new(unpaired_header(8));
         let seq = vec![b'A'; 32];
-        block.push(SequencingRecordBuilder::default().s_seq(&seq).build().unwrap())
+        block
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
-        let result = block.push(SequencingRecordBuilder::default().s_seq(&seq).build().unwrap());
+        let result = block.push(
+            SequencingRecordBuilder::default()
+                .s_seq(&seq)
+                .build()
+                .unwrap(),
+        );
         assert!(matches!(
             result,
             Err(Error::CbqError(CbqError::BlockFull { .. }))
@@ -1117,7 +1128,12 @@ mod tests {
         assert_eq!(block.usage(), 0.0);
         let seq = vec![b'A'; 32];
         block
-            .push(SequencingRecordBuilder::default().s_seq(&seq).build().unwrap())
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
         assert!(block.usage() > 0.0);
     }
@@ -1268,12 +1284,22 @@ mod tests {
         let mut block = ColumnarBlock::new(unpaired_header(8));
         let seq = vec![b'A'; 32];
         block
-            .push(SequencingRecordBuilder::default().s_seq(&seq).build().unwrap())
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
         let mut other = ColumnarBlock::new(unpaired_header(8));
         other
-            .push(SequencingRecordBuilder::default().s_seq(&seq).build().unwrap())
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(&seq)
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
         let result = block.take_incomplete(&other);
@@ -1304,7 +1330,8 @@ mod tests {
 
         // Stream the compressed columns back through `read_from` + `decompress_columns`,
         // matching what the streaming `Reader` does.
-        let mut cursor = std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
         let mut reader_block = ColumnarBlock::new(header);
         reader_block.read_from(&mut cursor, block_header).unwrap();
         reader_block.decompress_columns().unwrap();
@@ -1379,14 +1406,20 @@ mod tests {
         let header = unpaired_header(1 << 16);
         let mut block = ColumnarBlock::new(header);
         block
-            .push(SequencingRecordBuilder::default().s_seq(b"ACGT").build().unwrap())
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(b"ACGT")
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
         let mut cctx = zstd_safe::CCtx::create();
         let mut buffer = Vec::new();
         let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
 
-        let mut cursor = std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
         let mut reader_block = ColumnarBlock::new(header);
         reader_block.read_from(&mut cursor, block_header).unwrap();
         reader_block.decompress_columns().unwrap();
@@ -1406,14 +1439,20 @@ mod tests {
         let header = unpaired_header(1 << 16);
         let mut block = ColumnarBlock::new(header);
         block
-            .push(SequencingRecordBuilder::default().s_seq(b"ACGT").build().unwrap())
+            .push(
+                SequencingRecordBuilder::default()
+                    .s_seq(b"ACGT")
+                    .build()
+                    .unwrap(),
+            )
             .unwrap();
 
         let mut cctx = zstd_safe::CCtx::create();
         let mut buffer = Vec::new();
         let block_header = block.flush_to(&mut buffer, &mut cctx).unwrap().unwrap();
 
-        let mut cursor = std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
+        let mut cursor =
+            std::io::Cursor::new(buffer[std::mem::size_of::<BlockHeader>()..].to_vec());
         let mut reader_block = ColumnarBlock::new(header);
         reader_block.read_from(&mut cursor, block_header).unwrap();
         reader_block.decompress_columns().unwrap();
