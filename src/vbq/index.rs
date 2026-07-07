@@ -629,3 +629,127 @@ impl BlockIndex {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes a minimal raw VBQ file (file header + block headers/data, with
+    /// **no** embedded index) to `path`, suitable for `BlockIndex::from_vbq`.
+    ///
+    /// `from_vbq` scans block-by-block from just after the file header to
+    /// EOF, so it requires the file to end exactly at the last block's data
+    /// -- unlike files produced by `vbq::Writer`, which always append an
+    /// embedded index on `finish()` that `from_vbq` cannot parse as a block.
+    fn write_raw_vbq_file(path: &str, blocks: &[(u64, u32)]) {
+        let mut buffer = Vec::new();
+        FileHeader::default().write_bytes(&mut buffer).unwrap();
+        for &(size, records) in blocks {
+            BlockHeader::new(size, records)
+                .write_bytes(&mut buffer)
+                .unwrap();
+            buffer.extend(std::iter::repeat_n(0u8, size as usize));
+        }
+        std::fs::write(path, buffer).unwrap();
+    }
+
+    // ==================== BlockIndex::from_vbq Tests ====================
+
+    #[test]
+    fn test_from_vbq() {
+        let path = "test_index_from_vbq.vbq";
+        write_raw_vbq_file(path, &[(64, 3), (128, 5)]);
+
+        let index = BlockIndex::from_vbq(path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(index.n_blocks(), 2);
+        assert_eq!(index.num_records(), 8);
+        assert_eq!(index.ranges()[0].cumulative_records, 0);
+        assert_eq!(index.ranges()[1].cumulative_records, 3);
+    }
+
+    #[test]
+    fn test_from_vbq_nonexistent_file() {
+        let result = BlockIndex::from_vbq("./data/does_not_exist.vbq");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_n_blocks() {
+        let path = "test_index_n_blocks.vbq";
+        write_raw_vbq_file(path, &[(32, 1)]);
+
+        let index = BlockIndex::from_vbq(path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(index.n_blocks(), index.ranges().len());
+    }
+
+    #[test]
+    fn test_pprint() {
+        let path = "test_index_pprint.vbq";
+        write_raw_vbq_file(path, &[(32, 1)]);
+
+        // Just verify it doesn't panic
+        let index = BlockIndex::from_vbq(path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        index.pprint();
+    }
+
+    #[test]
+    fn test_num_records_empty_index() {
+        let index = BlockIndex::new(IndexHeader::new(0));
+        assert_eq!(index.num_records(), 0);
+        assert_eq!(index.n_blocks(), 0);
+    }
+
+    // ==================== IndexHeader Tests ====================
+
+    #[test]
+    fn test_index_header_from_reader_invalid_magic() {
+        let mut buffer = [0u8; INDEX_HEADER_SIZE];
+        LittleEndian::write_u64(&mut buffer[0..8], 0xDEAD_BEEF);
+        let result = IndexHeader::from_reader(&mut Cursor::new(buffer));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_index_header_roundtrip() {
+        let header = IndexHeader::new(12345);
+        let mut buffer = Vec::new();
+        header.write_bytes(&mut buffer).unwrap();
+        let parsed = IndexHeader::from_reader(&mut Cursor::new(buffer)).unwrap();
+        assert_eq!(parsed.bytes, 12345);
+        assert_eq!(parsed.magic, INDEX_MAGIC);
+    }
+
+    // ==================== BlockIndex round-trip through write_bytes/from_bytes ====================
+
+    #[test]
+    fn test_block_index_write_and_from_bytes_roundtrip() {
+        let mut index = BlockIndex::new(IndexHeader::new(999));
+        index.add_range(BlockRange::new(32, 100, 5, 0));
+        index.add_range(BlockRange::new(164, 200, 7, 5));
+
+        let mut buffer = Vec::new();
+        index.write_bytes(&mut buffer).unwrap();
+
+        let parsed = BlockIndex::from_bytes(&buffer).unwrap();
+        assert_eq!(parsed.n_blocks(), 2);
+        assert_eq!(parsed.num_records(), 12);
+        assert_eq!(parsed.ranges()[0].start_offset, 32);
+        assert_eq!(parsed.ranges()[1].cumulative_records, 5);
+    }
+
+    #[test]
+    fn test_block_index_write_range_skips_empty_blocks() {
+        let mut index = BlockIndex::new(IndexHeader::new(0));
+        index.add_range(BlockRange::new(32, 0, 0, 0));
+        index.add_range(BlockRange::new(64, 50, 3, 0));
+
+        let mut buffer = Vec::new();
+        index.write_range(&mut buffer).unwrap();
+        assert_eq!(buffer.len(), SIZE_BLOCK_RANGE);
+    }
+}
