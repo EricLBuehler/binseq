@@ -37,7 +37,7 @@ impl GrepCounter {
 }
 impl ParallelProcessor for GrepCounter {
     fn process_record<R: binseq::BinseqRecord>(&mut self, record: R) -> binseq::Result<()> {
-        if self.match_sequence(&record.sseq()) || self.match_sequence(&record.xseq()) {
+        if self.match_sequence(record.sseq()) || self.match_sequence(record.xseq()) {
             self.local_count += 1;
         }
 
