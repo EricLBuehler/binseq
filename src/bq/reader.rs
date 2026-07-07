@@ -599,6 +599,14 @@ pub struct StreamReader<R: Read> {
 
     /// Length of valid data in the buffer
     buffer_len: usize,
+
+    /// Number of records returned so far, used to assign each record's id
+    ///
+    /// This is tracked independently of `buffer_pos` because `fill_buffer`
+    /// shifts remaining bytes to the start of the buffer and resets
+    /// `buffer_pos` whenever a mid-stream refill is needed, so `buffer_pos`
+    /// no longer reflects the absolute stream offset once that happens.
+    records_read: u64,
 }
 
 impl<R: Read> StreamReader<R> {
@@ -641,6 +649,7 @@ impl<R: Read> StreamReader<R> {
             buffer_pos: 0,
             buffer_len: 0,
             default_quality_score: DEFAULT_QUALITY_SCORE,
+            records_read: 0,
         }
     }
 
@@ -797,10 +806,12 @@ impl<R: Read> StreamReader<R> {
             self.qbuf.resize(max_size, self.default_quality_score);
         }
 
-        // Create record with incremental ID (based on read position)
-        let id = (record_start - SIZE_HEADER) / record_size;
+        // Create record with an incremental ID, tracked independently of
+        // buffer position since `fill_buffer` may have shifted the buffer
+        let id = self.records_read;
+        self.records_read += 1;
         Some(Ok(RefRecord::new(
-            id as u64,
+            id,
             record_u64s,
             &self.qbuf,
             config,
@@ -1460,21 +1471,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "attempt to subtract with overflow")]
     fn test_stream_reader_small_buffer_forces_multiple_fills() {
-        // Known bug (tracked separately, not fixed here): once a tiny buffer
-        // capacity forces `fill_buffer` to shift remaining bytes to the start
-        // of the internal buffer (reader.rs:716-719), `buffer_pos` no longer
-        // reflects the absolute stream offset. `next_record`'s id calculation
-        // (reader.rs:801) assumes it still does, and underflows. This test
-        // pins current (buggy) behavior so it fails loudly once fixed --
-        // at which point it should be rewritten to assert sequential ids
-        // across the fill boundary instead.
+        // Use a tiny buffer capacity so `fill_buffer` must shift remaining
+        // bytes to the start of the internal buffer mid-stream (reader.rs
+        // 716-719). Record ids are tracked via a dedicated `records_read`
+        // counter (not derived from `buffer_pos`), so they must still come
+        // back sequential across that shift boundary.
         let data = build_stream_bytes(false);
         let mut reader = StreamReader::with_capacity(std::io::Cursor::new(data), 40);
+        let mut expected_id = 0u64;
         while let Some(record) = reader.next_record() {
-            record.unwrap();
+            let record = record.unwrap();
+            assert_eq!(record.index(), expected_id);
+            expected_id += 1;
         }
+        assert_eq!(expected_id, 5);
     }
 
     #[test]
