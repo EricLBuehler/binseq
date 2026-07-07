@@ -27,7 +27,7 @@ jobs:
       - name: Formatting
         run: cargo fmt --check
       - name: Linting
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   example_grep:
     runs-on: ubuntu-latest
