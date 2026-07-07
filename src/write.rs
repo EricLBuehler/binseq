@@ -430,7 +430,10 @@ impl BinseqWriterBuilder {
             .with_headers(self.headers)
             .with_flags(self.flags)
             .with_optional_block_size(self.block_size)
-            .with_optional_compression_level(self.compression_level.map(|level| level as usize))
+            .with_optional_compression_level(
+                self.compression_level
+                    .map(|level| usize::try_from(level).unwrap_or(0)),
+            )
             .build();
 
         let inner = if self.headless {
@@ -447,6 +450,11 @@ impl BinseqWriterBuilder {
 ///
 /// This enum wraps the three format-specific writers (BQ, VBQ, CBQ) and provides
 /// a unified interface for writing sequence data.
+// `cbq::ColumnarBlockWriter` is intrinsically larger than the other variants (it holds a
+// reusable `ColumnarBlock` encode buffer). Boxing it would shrink this enum but is a breaking
+// change to the variant's public field type, so it's left as-is rather than churn downstream
+// consumers.
+#[allow(clippy::large_enum_variant)]
 pub enum BinseqWriter<W: Write> {
     /// BQ format writer
     Bq(bq::Writer<W>),

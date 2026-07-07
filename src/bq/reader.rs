@@ -682,27 +682,25 @@ impl<R: Read> StreamReader<R> {
     /// * The header data is invalid
     /// * End of stream is reached before the full header can be read
     pub fn read_header(&mut self) -> Result<&FileHeader> {
-        if self.header.is_some() {
-            return Ok(self
-                .header
-                .as_ref()
-                .expect("Missing header when expected in stream"));
+        if self.header.is_none() {
+            // Ensure we have enough data for the header
+            while self.buffer_len - self.buffer_pos < SIZE_HEADER {
+                self.fill_buffer()?;
+            }
+
+            // Parse header
+            let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
+            let header = FileHeader::from_buffer(header_slice)?;
+
+            self.header = Some(header);
+            self.config = Some(RecordConfig::from_header(&header));
+            self.buffer_pos += SIZE_HEADER;
         }
 
-        // Ensure we have enough data for the header
-        while self.buffer_len - self.buffer_pos < SIZE_HEADER {
-            self.fill_buffer()?;
-        }
-
-        // Parse header
-        let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
-        let header = FileHeader::from_buffer(header_slice)?;
-
-        self.header = Some(header);
-        self.config = Some(RecordConfig::from_header(&header));
-        self.buffer_pos += SIZE_HEADER;
-
-        Ok(self.header.as_ref().unwrap())
+        Ok(self
+            .header
+            .as_ref()
+            .expect("header was just populated above"))
     }
 
     /// Fills the internal buffer with more data from the reader

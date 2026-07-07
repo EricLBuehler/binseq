@@ -13,6 +13,10 @@ use crate::{
 /// distinction between BINSEQ readers is not important.
 ///
 /// For more specialized workflows see [`bq::MmapReader`], [`vbq::MmapReader`], and [`cbq::MmapReader`].
+// `cbq::MmapReader` is intrinsically larger than the other variants (it holds a reusable
+// `ColumnarBlock` decode buffer). Boxing it would shrink this enum but is a breaking change to
+// the variant's public field type, so it's left as-is rather than churn downstream consumers.
+#[allow(clippy::large_enum_variant)]
 pub enum BinseqReader {
     Bq(bq::MmapReader),
     Vbq(vbq::MmapReader),
