@@ -355,9 +355,8 @@ mod tests {
     #[test]
     fn test_mmap_reader_is_paired() {
         let reader = MmapReader::new(TEST_CBQ_FILE).unwrap();
-        let is_paired = reader.is_paired();
-        // Test that the method returns a boolean
-        assert!(is_paired || !is_paired);
+        // The fixture file contains paired records
+        assert!(reader.is_paired());
     }
 
     #[test]
@@ -445,8 +444,7 @@ mod tests {
             let final_count = *count.lock().unwrap();
             assert_eq!(
                 final_count, expected_count,
-                "Should process exactly {} records",
-                expected_count
+                "Should process exactly {expected_count} records"
             );
         }
     }

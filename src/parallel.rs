@@ -264,8 +264,8 @@ mod testing {
     #[test]
     fn test_parallel_processor() {
         for ext in ["bq", "vbq", "cbq"] {
-            eprintln!("Testing {}", ext);
-            let reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext}");
+            let reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             let num_records = reader.num_records().unwrap();
             let processor = TestProcessor::default();
             assert!(reader.process_parallel(processor.clone(), 0).is_ok());
@@ -276,8 +276,8 @@ mod testing {
     #[test]
     fn test_parallel_processor_range() {
         for ext in ["bq", "vbq", "cbq"] {
-            eprintln!("Testing {}", ext);
-            let reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext}");
+            let reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             let processor = TestProcessor::default();
             assert!(
                 reader
@@ -291,8 +291,8 @@ mod testing {
     #[test]
     fn test_parallel_processor_out_of_range_start() {
         for ext in ["bq", "vbq", "cbq"] {
-            eprintln!("Testing {}", ext);
-            let reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext}");
+            let reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             let processor = TestProcessor::default();
             assert!(
                 reader
@@ -305,8 +305,8 @@ mod testing {
     #[test]
     fn test_parallel_processor_out_of_range_end() {
         for ext in ["bq", "vbq", "cbq"] {
-            eprintln!("Testing {}", ext);
-            let reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext}");
+            let reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             let processor = TestProcessor::default();
             assert!(
                 reader
@@ -317,10 +317,13 @@ mod testing {
     }
 
     #[test]
+    // A backwards range (start > end) is intentionally passed here to verify
+    // that the function rejects it as invalid, not iterated over.
+    #[allow(clippy::reversed_empty_ranges)]
     fn test_parallel_processor_backwards_range() {
         for ext in ["bq", "vbq", "cbq"] {
-            eprintln!("Testing {}", ext);
-            let reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext}");
+            let reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             let processor = TestProcessor::default();
             assert!(reader.process_parallel_range(processor, 0, 100..0).is_err());
         }
@@ -330,8 +333,8 @@ mod testing {
     fn test_set_decode_block() {
         for ext in ["bq", "vbq", "cbq"] {
             for opt in [true, false] {
-                eprintln!("Testing {} - decode {}", ext, opt);
-                let mut reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+                eprintln!("Testing {ext} - decode {opt}");
+                let mut reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
                 reader.set_decode_block(opt);
                 let num_records = reader.num_records().unwrap();
                 let processor = TestProcessor::default();
@@ -345,8 +348,8 @@ mod testing {
     fn test_set_default_quality_score() {
         for ext in ["bq", "vbq", "cbq"] {
             let default_score = b'#';
-            eprintln!("Testing {} - default score: {}", ext, default_score);
-            let mut reader = BinseqReader::new(&format!("./data/subset.{}", ext)).unwrap();
+            eprintln!("Testing {ext} - default score: {default_score}");
+            let mut reader = BinseqReader::new(format!("./data/subset.{ext}")).unwrap();
             reader.set_default_quality_score(default_score);
             let num_records = reader.num_records().unwrap();
             let processor = TestProcessor::default();

@@ -1125,7 +1125,7 @@ mod tests {
     #[test]
     fn test_usage() {
         let mut block = ColumnarBlock::new(unpaired_header(1 << 16));
-        assert_eq!(block.usage(), 0.0);
+        assert!(block.usage().abs() < f64::EPSILON);
         let seq = vec![b'A'; 32];
         block
             .push(

@@ -371,30 +371,30 @@ mod testing {
 
     #[test]
     fn test_header_error_invalid_magic_number() {
-        let error = HeaderError::InvalidMagicNumber(0xDEADBEEF);
-        let error_str = format!("{}", error);
+        let error = HeaderError::InvalidMagicNumber(0xDEAD_BEEF);
+        let error_str = format!("{error}");
         assert!(error_str.contains("0xdeadbeef") || error_str.contains("3735928559"));
     }
 
     #[test]
     fn test_header_error_invalid_format_version() {
         let error = HeaderError::InvalidFormatVersion(99);
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("99"));
     }
 
     #[test]
     fn test_header_error_invalid_bit_size() {
         let error = HeaderError::InvalidBitSize(8);
-        let error_str = format!("{}", error);
-        assert!(error_str.contains("8"));
+        let error_str = format!("{error}");
+        assert!(error_str.contains('8'));
         assert!(error_str.contains("[2,4]"));
     }
 
     #[test]
     fn test_header_error_invalid_size() {
         let error = HeaderError::InvalidSize(100, 200);
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("100"));
         assert!(error_str.contains("200"));
     }
@@ -407,7 +407,7 @@ mod testing {
             requested_index: 150,
             max_index: 100,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("150"));
         assert!(error_str.contains("100"));
     }
@@ -415,21 +415,21 @@ mod testing {
     #[test]
     fn test_read_error_file_truncation() {
         let error = ReadError::FileTruncation(12345);
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("12345"));
     }
 
     #[test]
     fn test_read_error_partial_record() {
         let error = ReadError::PartialRecord(42);
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("42"));
     }
 
     #[test]
     fn test_read_error_invalid_block_magic_number() {
-        let error = ReadError::InvalidBlockMagicNumber(0xBADC0DE, 1000);
-        let error_str = format!("{}", error);
+        let error = ReadError::InvalidBlockMagicNumber(0x0BAD_C0DE, 1000);
+        let error_str = format!("{error}");
         assert!(error_str.contains("1000"));
     }
 
@@ -442,7 +442,7 @@ mod testing {
             expected: true,
             actual: false,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("paired"));
         assert!(error_str.contains("true"));
         assert!(error_str.contains("false"));
@@ -454,7 +454,7 @@ mod testing {
             expected: 100,
             got: 150,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("100"));
         assert!(error_str.contains("150"));
     }
@@ -462,14 +462,14 @@ mod testing {
     #[test]
     fn test_write_error_invalid_nucleotide_sequence() {
         let error = WriteError::InvalidNucleotideSequence("ACGTNX".to_string());
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("ACGTNX"));
     }
 
     #[test]
     fn test_write_error_record_size_exceeds_max() {
         let error = WriteError::RecordSizeExceedsMaximumBlockSize(2000, 1024);
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("2000"));
         assert!(error_str.contains("1024"));
     }
@@ -482,7 +482,7 @@ mod testing {
             obs_primary: false,
             obs_extended: false,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("Missing required sequence length"));
     }
 
@@ -494,7 +494,7 @@ mod testing {
             max_block_size: 1024,
             record_size: 2048,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("1024"));
         assert!(error_str.contains("2048"));
     }
@@ -506,7 +506,7 @@ mod testing {
             record_size: 200,
             block_size: 1024,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("900"));
         assert!(error_str.contains("200"));
         assert!(error_str.contains("1024"));
@@ -518,7 +518,7 @@ mod testing {
             self_block_size: 1024,
             other_block_size: 2048,
         };
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("1024"));
         assert!(error_str.contains("2048"));
     }
@@ -528,7 +528,7 @@ mod testing {
     #[test]
     fn test_builder_error_missing_slen() {
         let error = BuilderError::MissingSlen;
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("Missing sequence length"));
     }
 
@@ -537,7 +537,7 @@ mod testing {
     #[test]
     fn test_extension_error_unsupported() {
         let error = ExtensionError::UnsupportedExtension("test.xyz".to_string());
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("test.xyz"));
     }
 
@@ -588,7 +588,7 @@ mod testing {
     #[test]
     fn test_error_debug_output() {
         let error = Error::WriteError(WriteError::MissingHeader);
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("WriteError"));
     }
 
@@ -599,7 +599,7 @@ mod testing {
     fn test_fastx_error_empty_file() {
         use super::FastxEncodingError;
         let error = FastxEncodingError::EmptyFastxFile;
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("Empty FASTX file"));
     }
 
@@ -608,7 +608,7 @@ mod testing {
     fn test_fastx_error_missing_input() {
         use super::FastxEncodingError;
         let error = FastxEncodingError::MissingInput;
-        let error_str = format!("{}", error);
+        let error_str = format!("{error}");
         assert!(error_str.contains("not provided with any input"));
     }
 }

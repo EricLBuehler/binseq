@@ -435,13 +435,7 @@ mod tests {
         (0..n_seq)
             .map(|i| {
                 (0..seq_len)
-                    .map(|j| {
-                        if i % 5 == 0 {
-                            b'N'
-                        } else {
-                            BASES[(i as usize + j) % 4]
-                        }
-                    })
+                    .map(|j| if i % 5 == 0 { b'N' } else { BASES[(i + j) % 4] })
                     .collect::<Vec<u8>>()
             })
             .collect()

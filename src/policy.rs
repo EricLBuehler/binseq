@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn test_policy_debug() {
         let policy = Policy::SetToA;
-        let debug_str = format!("{:?}", policy);
+        let debug_str = format!("{policy:?}");
         assert!(debug_str.contains("SetToA"));
     }
 

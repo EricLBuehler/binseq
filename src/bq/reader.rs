@@ -1035,9 +1035,8 @@ mod tests {
     #[test]
     fn test_mmap_reader_is_paired() {
         let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
-        let is_paired = reader.is_paired();
-        // Test that the method returns a boolean
-        assert!(is_paired || !is_paired); // Always true, tests the method works
+        // The fixture file contains paired records
+        assert!(reader.is_paired());
     }
 
     #[test]
@@ -1125,8 +1124,7 @@ mod tests {
             // All quality scores should be the custom score
             assert!(
                 squal.iter().all(|&q| q == custom_score),
-                "All quality scores should be {}",
-                custom_score
+                "All quality scores should be {custom_score}"
             );
         }
     }
@@ -1184,8 +1182,7 @@ mod tests {
             let final_count = *count.lock().unwrap();
             assert_eq!(
                 final_count, expected_count,
-                "Should process exactly {} records",
-                expected_count
+                "Should process exactly {expected_count} records"
             );
         }
     }
@@ -1198,8 +1195,16 @@ mod tests {
         let header = reader.header();
         let config = RecordConfig::from_header(&header);
 
-        assert_eq!(config.slen, header.slen as u64, "Sequence length mismatch");
-        assert_eq!(config.xlen, header.xlen as u64, "Extended length mismatch");
+        assert_eq!(
+            config.slen,
+            u64::from(header.slen),
+            "Sequence length mismatch"
+        );
+        assert_eq!(
+            config.xlen,
+            u64::from(header.xlen),
+            "Extended length mismatch"
+        );
         assert_eq!(config.bitsize, header.bits, "Bit size mismatch");
     }
 
@@ -1246,17 +1251,17 @@ mod tests {
     fn test_ref_record_paired_data() {
         let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
 
-        if reader.is_paired() {
-            if let Ok(record) = reader.get(0) {
-                let xbuf = record.xbuf();
-                let xlen = record.xlen();
+        if reader.is_paired()
+            && let Ok(record) = reader.get(0)
+        {
+            let xbuf = record.xbuf();
+            let xlen = record.xlen();
 
-                if xlen > 0 {
-                    assert!(
-                        !xbuf.is_empty(),
-                        "Extended buffer should not be empty for paired"
-                    );
-                }
+            if xlen > 0 {
+                assert!(
+                    !xbuf.is_empty(),
+                    "Extended buffer should not be empty for paired"
+                );
             }
         }
     }
@@ -1291,12 +1296,11 @@ mod tests {
 
         for i in 0..num_records {
             let record = reader.get(i);
-            assert!(record.is_ok(), "Should get record at index {}", i);
+            assert!(record.is_ok(), "Should get record at index {i}");
             assert_eq!(
                 record.unwrap().index() as usize,
                 i,
-                "Record index mismatch at {}",
-                i
+                "Record index mismatch at {i}"
             );
         }
     }
@@ -1311,7 +1315,7 @@ mod tests {
 
             for &idx in &indices {
                 let record = reader.get(idx);
-                assert!(record.is_ok(), "Should get record at index {}", idx);
+                assert!(record.is_ok(), "Should get record at index {idx}");
                 assert_eq!(record.unwrap().index() as usize, idx);
             }
         }
