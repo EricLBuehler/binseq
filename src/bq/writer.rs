@@ -794,6 +794,7 @@ mod testing {
     use std::{fs::File, io::BufWriter};
 
     use super::*;
+    use crate::SequencingRecordBuilder;
     use crate::bq::{FileHeaderBuilder, SIZE_HEADER};
 
     #[test]
@@ -858,6 +859,320 @@ mod testing {
         // Convert back to Vec to verify it works
         let inner = writer.into_inner()?;
         assert_eq!(inner.len(), SIZE_HEADER);
+        Ok(())
+    }
+
+    // ==================== Encoder Tests ====================
+
+    #[test]
+    fn test_encoder_new() {
+        let header = FileHeaderBuilder::new().slen(8).build().unwrap();
+        let encoder = Encoder::new(header);
+        assert!(matches!(encoder.policy, Policy::IgnoreSequence));
+    }
+
+    #[test]
+    fn test_encoder_encode_single_wrong_length() {
+        let header = FileHeaderBuilder::new().slen(8).build().unwrap();
+        let mut encoder = Encoder::new(header);
+        let result = encoder.encode_single(b"ACGT");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoder_encode_single_invalid_ignored() {
+        let header = FileHeaderBuilder::new().slen(8).build().unwrap();
+        let mut encoder = Encoder::with_policy(header, Policy::IgnoreSequence);
+        let result = encoder.encode_single(b"ACGTNNNN").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_encoder_encode_single_invalid_corrected() {
+        let header = FileHeaderBuilder::new().slen(8).build().unwrap();
+        let mut encoder = Encoder::with_policy(header, Policy::SetToA);
+        let result = encoder.encode_single(b"ACGTNNNN").unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_encoder_encode_paired_wrong_primary_length() {
+        let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
+        let mut encoder = Encoder::new(header);
+        let result = encoder.encode_paired(b"ACGT", b"ACGTACGT");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoder_encode_paired_wrong_extended_length() {
+        let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
+        let mut encoder = Encoder::new(header);
+        let result = encoder.encode_paired(b"ACGTACGT", b"ACGT");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoder_encode_paired_invalid_ignored() {
+        let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
+        let mut encoder = Encoder::with_policy(header, Policy::IgnoreSequence);
+        let result = encoder
+            .encode_paired(b"ACGTNNNN", b"ACGTACGT")
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_encoder_encode_paired_invalid_corrected() {
+        let header = FileHeaderBuilder::new().slen(8).xlen(8).build().unwrap();
+        let mut encoder = Encoder::with_policy(header, Policy::SetToA);
+        let result = encoder
+            .encode_paired(b"ACGTNNNN", b"NNNNACGT")
+            .unwrap();
+        assert!(result.is_some());
+    }
+
+    // ==================== WriterBuilder Tests ====================
+
+    #[test]
+    fn test_writer_builder_missing_header() {
+        let result = WriterBuilder::default().build(Vec::new());
+        assert!(result.is_err());
+    }
+
+    // ==================== Deprecated Writer Methods ====================
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_write_record_deprecated() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        let wrote = writer.write_record(None, b"ACGTACGT")?;
+        assert!(wrote);
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_write_record_deprecated_skipped() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        let wrote = writer.write_record(None, b"NNNNNNNN")?;
+        assert!(!wrote);
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_write_paired_record_deprecated() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).xlen(8).flags(true).build()?)
+            .build(Vec::new())?;
+        let wrote = writer.write_paired_record(Some(5), b"ACGTACGT", b"TTGGCCAA")?;
+        assert!(wrote);
+        Ok(())
+    }
+
+    // ==================== push() Tests ====================
+
+    #[test]
+    fn test_push_single() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .build()?;
+        assert!(writer.push(record)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_push_single_invalid_skipped() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"NNNNNNNN")
+            .build()?;
+        assert!(!writer.push(record)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_push_paired() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).xlen(8).build()?)
+            .build(Vec::new())?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .x_seq(b"TTGGCCAA")
+            .build()?;
+        assert!(writer.push(record)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_push_paired_invalid_skipped() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).xlen(8).build()?)
+            .build(Vec::new())?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"NNNNNNNN")
+            .x_seq(b"TTGGCCAA")
+            .build()?;
+        assert!(!writer.push(record)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_push_paired_mismatch() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).xlen(8).build()?)
+            .build(Vec::new())?;
+        // Writer expects paired records but record has no x_seq
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .build()?;
+        let result = writer.push(record);
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_push_with_flag() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).flags(true).build()?)
+            .build(Vec::new())?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .flag(99)
+            .build()?;
+        assert!(writer.push(record)?);
+        Ok(())
+    }
+
+    // ==================== Writer Misc Tests ====================
+
+    #[test]
+    fn test_new_encoder() -> Result<()> {
+        let writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        let encoder = writer.new_encoder();
+        assert!(encoder.sbuffer.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_flush() -> Result<()> {
+        let mut writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_ingest() -> Result<()> {
+        let mut main_writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .build(Vec::new())?;
+
+        let header = main_writer.header();
+        let mut other_writer = WriterBuilder::default()
+            .header(header)
+            .headless(true)
+            .build(Vec::new())?;
+
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .build()?;
+        other_writer.push(record)?;
+
+        main_writer.ingest(&mut other_writer)?;
+        assert!(other_writer.by_ref().is_empty());
+        assert_eq!(main_writer.by_ref().len(), SIZE_HEADER + 8);
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_policy_accessor() -> Result<()> {
+        let writer = WriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .policy(Policy::SetToA)
+            .build(Vec::new())?;
+        assert!(matches!(writer.policy(), Policy::SetToA));
+        Ok(())
+    }
+
+    // ==================== StreamWriter Tests ====================
+
+    #[test]
+    fn test_stream_writer_new() -> Result<()> {
+        let writer = StreamWriter::new(
+            Vec::new(),
+            FileHeaderBuilder::new().slen(8).build()?,
+            Policy::default(),
+            false,
+        )?;
+        let inner = writer.into_inner()?;
+        assert_eq!(inner.len(), SIZE_HEADER);
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_stream_writer_deprecated_methods() -> Result<()> {
+        let mut writer = StreamWriter::new(
+            Vec::new(),
+            FileHeaderBuilder::new().slen(8).xlen(8).build()?,
+            Policy::default(),
+            false,
+        )?;
+        assert!(writer.write_record(None, b"ACGTACGT")?);
+        assert!(writer.write_paired_record(None, b"ACGTACGT", b"TTGGCCAA")?);
+        writer.flush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_writer_push() -> Result<()> {
+        let mut writer = StreamWriter::new(
+            Vec::new(),
+            FileHeaderBuilder::new().slen(8).build()?,
+            Policy::default(),
+            false,
+        )?;
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGTACGT")
+            .build()?;
+        assert!(writer.push(record)?);
+        writer.flush()?;
+        let inner = writer.into_inner()?;
+        assert_eq!(inner.len(), SIZE_HEADER + 8);
+        Ok(())
+    }
+
+    // ==================== StreamWriterBuilder Tests ====================
+
+    #[test]
+    fn test_stream_writer_builder_missing_header() {
+        let result = StreamWriterBuilder::default().build(Vec::new());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stream_writer_builder_with_policy_and_headless() -> Result<()> {
+        let inner = Vec::new();
+        let writer = StreamWriterBuilder::default()
+            .header(FileHeaderBuilder::new().slen(8).build()?)
+            .policy(Policy::SetToA)
+            .headless(true)
+            .build(inner)?;
+        let inner = writer.into_inner()?;
+        assert!(inner.is_empty());
         Ok(())
     }
 }

@@ -1312,4 +1312,203 @@ mod tests {
             }
         }
     }
+
+    // ==================== get_buffer_slice Tests ====================
+
+    #[test]
+    fn test_get_buffer_slice_valid() {
+        let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
+        let num_records = reader.num_records().min(10);
+        let slice = reader.get_buffer_slice(0..num_records);
+        assert!(slice.is_ok());
+        assert_eq!(
+            slice.unwrap().len(),
+            num_records * reader.config.record_size_u64()
+        );
+    }
+
+    #[test]
+    fn test_get_buffer_slice_out_of_range() {
+        let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
+        let num_records = reader.num_records();
+        let slice = reader.get_buffer_slice(0..(num_records + 100));
+        assert!(slice.is_err());
+    }
+
+    // ==================== MmapReader Error Path Tests ====================
+
+    #[test]
+    fn test_mmap_reader_directory_is_incompatible() {
+        // Directories cannot be memory-mapped as regular files
+        let result = MmapReader::new("./data");
+        assert!(result.is_err(), "Should fail when given a directory");
+    }
+
+    #[test]
+    fn test_mmap_reader_truncated_file() {
+        use std::io::Write as _;
+
+        let path = "test_truncated_reader.bq";
+        {
+            let header = crate::bq::FileHeaderBuilder::new().slen(64).build().unwrap();
+            let mut file = std::fs::File::create(path).unwrap();
+            header.write_bytes(&mut file).unwrap();
+            // Write a partial record (not a full multiple of the record size)
+            file.write_all(&[0u8; 4]).unwrap();
+        }
+
+        let result = MmapReader::new(path);
+        assert!(result.is_err(), "Should fail on truncated record data");
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    // ==================== StreamReader Tests ====================
+
+    fn build_stream_bytes(paired: bool) -> Vec<u8> {
+        use crate::SequencingRecordBuilder;
+        use crate::bq::{FileHeaderBuilder, WriterBuilder};
+
+        let header = if paired {
+            FileHeaderBuilder::new().slen(64).xlen(32).build().unwrap()
+        } else {
+            FileHeaderBuilder::new().slen(64).build().unwrap()
+        };
+
+        let mut writer = WriterBuilder::default()
+            .header(header)
+            .build(Vec::new())
+            .unwrap();
+
+        for i in 0..5 {
+            let s_seq = vec![b"ACGT"[i % 4]; 64];
+            let x_seq = vec![b"TGCA"[i % 4]; 32];
+            let record = if paired {
+                SequencingRecordBuilder::default()
+                    .s_seq(&s_seq)
+                    .x_seq(&x_seq)
+                    .build()
+                    .unwrap()
+            } else {
+                SequencingRecordBuilder::default()
+                    .s_seq(&s_seq)
+                    .build()
+                    .unwrap()
+            };
+            writer.push(record).unwrap();
+        }
+        writer.flush().unwrap();
+        writer.into_inner()
+    }
+
+    #[test]
+    fn test_stream_reader_new_and_with_capacity() {
+        let data = build_stream_bytes(false);
+        let cursor = std::io::Cursor::new(data.clone());
+        let _reader = StreamReader::new(cursor);
+
+        let cursor = std::io::Cursor::new(data);
+        let _reader = StreamReader::with_capacity(cursor, 64);
+    }
+
+    #[test]
+    fn test_stream_reader_read_header() {
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let header = reader.read_header().unwrap();
+        assert_eq!(header.slen, 64);
+
+        // Second call should hit the cached path
+        let header_again = reader.read_header().unwrap();
+        assert_eq!(header_again.slen, 64);
+    }
+
+    #[test]
+    fn test_stream_reader_next_record_unpaired() {
+        let data = build_stream_bytes(false);
+        let mmap_reader = {
+            let path = "test_stream_reader_compare.bq";
+            std::fs::write(path, &data).unwrap();
+            let reader = MmapReader::new(path).unwrap();
+            std::fs::remove_file(path).unwrap();
+            reader
+        };
+
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let mut count = 0;
+        while let Some(record) = reader.next_record() {
+            let record = record.unwrap();
+            let expected = mmap_reader.get(count).unwrap();
+            assert_eq!(record.index(), expected.index());
+            assert_eq!(record.sbuf(), expected.sbuf());
+            count += 1;
+        }
+        assert_eq!(count, mmap_reader.num_records());
+    }
+
+    #[test]
+    fn test_stream_reader_next_record_paired() {
+        let data = build_stream_bytes(true);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let mut count = 0;
+        while let Some(record) = reader.next_record() {
+            let record = record.unwrap();
+            assert!(record.is_paired());
+            count += 1;
+        }
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to subtract with overflow")]
+    fn test_stream_reader_small_buffer_forces_multiple_fills() {
+        // Known bug (tracked separately, not fixed here): once a tiny buffer
+        // capacity forces `fill_buffer` to shift remaining bytes to the start
+        // of the internal buffer (reader.rs:716-719), `buffer_pos` no longer
+        // reflects the absolute stream offset. `next_record`'s id calculation
+        // (reader.rs:801) assumes it still does, and underflows. This test
+        // pins current (buggy) behavior so it fails loudly once fixed --
+        // at which point it should be rewritten to assert sequential ids
+        // across the fill boundary instead.
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::with_capacity(std::io::Cursor::new(data), 40);
+        while let Some(record) = reader.next_record() {
+            record.unwrap();
+        }
+    }
+
+    #[test]
+    fn test_stream_reader_partial_record_error() {
+        let mut data = build_stream_bytes(false);
+        // Truncate the data in the middle of the last record
+        data.truncate(data.len() - 4);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+
+        let mut saw_error = false;
+        while let Some(record) = reader.next_record() {
+            if record.is_err() {
+                saw_error = true;
+                break;
+            }
+        }
+        assert!(saw_error, "Expected a partial record error");
+    }
+
+    #[test]
+    fn test_stream_reader_set_default_quality_score() {
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        reader.set_default_quality_score(42);
+        if let Some(Ok(record)) = reader.next_record() {
+            assert!(record.squal().iter().all(|&q| q == 42));
+        }
+    }
+
+    #[test]
+    fn test_stream_reader_into_inner() {
+        let data = build_stream_bytes(false);
+        let reader = StreamReader::new(std::io::Cursor::new(data.clone()));
+        let cursor = reader.into_inner();
+        assert_eq!(cursor.into_inner(), data);
+    }
 }
