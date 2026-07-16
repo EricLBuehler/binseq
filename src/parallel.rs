@@ -1,11 +1,29 @@
+use std::fs::File;
+use std::io::Read as _;
 use std::ops::Range;
 use std::path::Path;
 
 use crate::{
     BinseqRecord, Result, bq, cbq,
-    error::{ExtensionError, ReadError},
+    error::{FormatError, ReadError},
     vbq,
+    write::Format,
 };
+
+/// Number of leading bytes read from a file to identify its BINSEQ format.
+///
+/// This must be at least as long as the longest format magic sequence (CBQ's, at 7 bytes).
+const MAGIC_PEEK_LEN: usize = 7;
+
+/// Determines the BINSEQ format of a file by inspecting its leading magic bytes.
+fn sniff_format<P: AsRef<Path>>(path: P) -> Result<Format> {
+    let file = File::open(path.as_ref())?;
+    let mut buffer = Vec::with_capacity(MAGIC_PEEK_LEN);
+    file.take(MAGIC_PEEK_LEN as u64).read_to_end(&mut buffer)?;
+    Format::sniff(&buffer).ok_or_else(|| {
+        FormatError::UnrecognizedMagicBytes(path.as_ref().to_string_lossy().to_string()).into()
+    })
+}
 
 /// An enum abstraction for BINSEQ readers that can process records in parallel
 ///
@@ -24,20 +42,10 @@ pub enum BinseqReader {
 }
 impl BinseqReader {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        match path.as_ref().extension() {
-            Some(ext) => match ext.to_str() {
-                Some("bq") => Ok(Self::Bq(bq::MmapReader::new(path)?)),
-                Some("vbq") => Ok(Self::Vbq(vbq::MmapReader::new(path)?)),
-                Some("cbq") => Ok(Self::Cbq(cbq::MmapReader::new(path)?)),
-                _ => Err(ExtensionError::UnsupportedExtension(
-                    path.as_ref().to_string_lossy().to_string(),
-                )
-                .into()),
-            },
-            None => Err(ExtensionError::UnsupportedExtension(
-                path.as_ref().to_string_lossy().to_string(),
-            )
-            .into()),
+        match sniff_format(&path)? {
+            Format::Bq => Ok(Self::Bq(bq::MmapReader::new(path)?)),
+            Format::Vbq => Ok(Self::Vbq(vbq::MmapReader::new(path)?)),
+            Format::Cbq => Ok(Self::Cbq(cbq::MmapReader::new(path)?)),
         }
     }
 
@@ -249,6 +257,35 @@ mod testing {
     use parking_lot::Mutex;
 
     use super::*;
+
+    #[test]
+    fn test_new_ignores_extension_uses_magic_bytes() {
+        let dir = std::env::temp_dir();
+
+        // A CBQ file saved with a .bq extension should still be read as CBQ.
+        let wrong_ext = dir.join("binseq_sniff_wrong_ext.bq");
+        std::fs::copy("./data/subset.cbq", &wrong_ext).unwrap();
+        let reader = BinseqReader::new(&wrong_ext).unwrap();
+        assert!(matches!(reader, BinseqReader::Cbq(_)));
+
+        // A BQ file with no extension at all should still be detected.
+        let no_ext = dir.join("binseq_sniff_no_ext");
+        std::fs::copy("./data/subset.bq", &no_ext).unwrap();
+        let reader = BinseqReader::new(&no_ext).unwrap();
+        assert!(matches!(reader, BinseqReader::Bq(_)));
+
+        std::fs::remove_file(&wrong_ext).unwrap();
+        std::fs::remove_file(&no_ext).unwrap();
+    }
+
+    #[test]
+    fn test_new_unrecognized_file_errors() {
+        let dir = std::env::temp_dir();
+        let junk = dir.join("binseq_sniff_junk.cbq");
+        std::fs::write(&junk, b"not a binseq file at all").unwrap();
+        assert!(BinseqReader::new(&junk).is_err());
+        std::fs::remove_file(&junk).unwrap();
+    }
 
     #[derive(Clone, Default)]
     struct TestProcessor {
