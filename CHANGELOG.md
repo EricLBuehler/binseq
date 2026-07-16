@@ -11,10 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bug in the `bq` stream reader that used an incorrect record id for small buffers.
 
+### Added
+
+- `BinseqReader::new` now determines a file's BINSEQ format (BQ, VBQ, or CBQ) by sniffing its
+  magic bytes instead of relying on the file extension, so it works regardless of how the file
+  is named.
+- `Format::sniff` for identifying a BINSEQ format from a byte buffer, plus public `FILE_MAGIC`
+  constants on `bq`, `vbq`, and `cbq`.
+
 ### Changed
 
 - Added clippy checks and additional lint allowances to CI, plus general style fixes.
 - Improved test coverage throughout the library.
+- Renamed `ExtensionError` to `FormatError` (`UnrecognizedMagicBytes` variant) to reflect
+  detection now being based on file content rather than the file extension.
 
 ## [0.9.3] - 2026-07-01
 
