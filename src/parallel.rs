@@ -18,8 +18,8 @@ const MAGIC_PEEK_LEN: usize = 7;
 /// Determines the BINSEQ format of a file by inspecting its leading magic bytes.
 fn sniff_format<P: AsRef<Path>>(path: P) -> Result<Format> {
     let file = File::open(path.as_ref())?;
-    let mut buffer = Vec::with_capacity(MAGIC_PEEK_LEN);
-    file.take(MAGIC_PEEK_LEN as u64).read_to_end(&mut buffer)?;
+    let mut buffer = [0u8; MAGIC_PEEK_LEN];
+    file.take(MAGIC_PEEK_LEN as u64).read_exact(&mut buffer)?;
     Format::sniff(&buffer).ok_or_else(|| {
         FormatError::UnrecognizedMagicBytes(path.as_ref().to_string_lossy().to_string()).into()
     })
