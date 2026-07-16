@@ -241,6 +241,6 @@ mod header;
 mod reader;
 mod writer;
 
-pub use header::{FileHeader, FileHeaderBuilder, SIZE_HEADER};
+pub use header::{FILE_MAGIC, FileHeader, FileHeaderBuilder, SIZE_HEADER};
 pub use reader::{MmapReader, RefRecord, StreamReader};
 pub use writer::{Encoder, StreamWriter, StreamWriterBuilder, Writer, WriterBuilder};
