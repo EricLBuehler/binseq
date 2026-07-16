@@ -25,6 +25,11 @@ use crate::error::{HeaderError, ReadError, Result};
 #[allow(clippy::unreadable_literal)]
 const MAGIC: u32 = 0x51455356;
 
+/// The magic bytes as they appear at the start of a VBQ file on disk.
+///
+/// Used to identify VBQ files by content rather than by file extension.
+pub const FILE_MAGIC: [u8; 4] = MAGIC.to_le_bytes();
+
 /// Magic number for block identification: "BLOCKSEQ" in ASCII (0x5145534B434F4C42)
 ///
 /// This constant is used in block headers to validate block integrity.

@@ -40,8 +40,8 @@ pub enum Error {
     #[error("Error with UTF8: {0}")]
     Utf8Error(#[from] std::str::Utf8Error),
 
-    /// Errors related to missing extensions
-    ExtensionError(#[from] ExtensionError),
+    /// Errors related to determining the BINSEQ format of a file
+    FormatError(#[from] FormatError),
 
     /// Errors from the bitnuc dependency for nucleotide encoding/decoding
     #[error("Bitnuc error: {0}")]
@@ -327,10 +327,10 @@ pub enum FastxEncodingError {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ExtensionError {
-    /// When the extension is not supported
-    #[error("Unsupported extension in path: {0}")]
-    UnsupportedExtension(String),
+pub enum FormatError {
+    /// When the BINSEQ format could not be determined from a file's magic bytes
+    #[error("Unable to determine BINSEQ format from magic bytes in file: {0}")]
+    UnrecognizedMagicBytes(String),
 }
 
 /// Trait for converting arbitrary errors into `Error`
@@ -532,11 +532,11 @@ mod testing {
         assert!(error_str.contains("Missing sequence length"));
     }
 
-    // ==================== ExtensionError Tests ====================
+    // ==================== FormatError Tests ====================
 
     #[test]
-    fn test_extension_error_unsupported() {
-        let error = ExtensionError::UnsupportedExtension("test.xyz".to_string());
+    fn test_format_error_unrecognized_magic_bytes() {
+        let error = FormatError::UnrecognizedMagicBytes("test.xyz".to_string());
         let error_str = format!("{error}");
         assert!(error_str.contains("test.xyz"));
     }

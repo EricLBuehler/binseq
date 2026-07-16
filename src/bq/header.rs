@@ -16,6 +16,11 @@ use crate::error::{BuilderError, HeaderError, Result};
 #[allow(clippy::unreadable_literal)]
 const MAGIC: u32 = 0x51455342;
 
+/// The magic bytes as they appear at the start of a BQ file on disk.
+///
+/// Used to identify BQ files by content rather than by file extension.
+pub const FILE_MAGIC: [u8; 4] = MAGIC.to_le_bytes();
+
 /// Current format version of the binary sequence file format
 ///
 /// This version number allows for future format changes while maintaining backward compatibility.
