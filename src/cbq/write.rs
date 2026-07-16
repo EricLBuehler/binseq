@@ -270,7 +270,7 @@ mod tests {
 
     /// 64 distinct fixed-length sequences (each unique by index).
     fn sample_sequences() -> Vec<Vec<u8>> {
-        const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+        const BASES: [u8; 4] = *b"ACGT";
         (0..64u32)
             .map(|i| {
                 (0..40)
@@ -431,7 +431,7 @@ mod tests {
     /// Blocks with no `N`s at all never populate `z_npos`, so a suite built
     /// only from `sample_sequences` (all ACGT) never exercises this path.
     fn sample_sequences_with_n(n_seq: usize, seq_len: usize) -> Vec<Vec<u8>> {
-        const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+        const BASES: [u8; 4] = *b"ACGT";
         (0..n_seq)
             .map(|i| {
                 (0..seq_len)

@@ -87,7 +87,7 @@ impl Args {
         let path = if let Some(output) = &self.output {
             output.clone()
         } else {
-            format!("{}{}", &self.prefix, self.format().extension())
+            format!("{}{}", self.prefix, self.format().extension())
         };
         let ofile = File::create(path).map(BufWriter::new)?;
         Ok(Box::new(ofile))
