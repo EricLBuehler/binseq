@@ -41,6 +41,7 @@ pub enum Error {
     Utf8Error(#[from] std::str::Utf8Error),
 
     /// Errors related to determining the BINSEQ format of a file
+    #[error("Error determining BINSEQ format: {0}")]
     FormatError(#[from] FormatError),
 
     /// Errors from the bitnuc dependency for nucleotide encoding/decoding
