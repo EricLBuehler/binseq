@@ -25,6 +25,11 @@ use crate::error::{HeaderError, ReadError, Result};
 #[allow(clippy::unreadable_literal)]
 const MAGIC: u32 = 0x51455356;
 
+/// The magic bytes as they appear at the start of a VBQ file on disk.
+///
+/// Used to identify VBQ files by content rather than by file extension.
+pub const FILE_MAGIC: [u8; 4] = MAGIC.to_le_bytes();
+
 /// Magic number for block identification: "BLOCKSEQ" in ASCII (0x5145534B434F4C42)
 ///
 /// This constant is used in block headers to validate block integrity.
@@ -555,5 +560,148 @@ impl BlockHeader {
     #[must_use]
     pub fn size_with_header(&self) -> usize {
         self.size as usize + SIZE_BLOCK_HEADER
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== FileHeaderBuilder Tests ====================
+
+    #[test]
+    fn test_builder_block_and_bitsize() {
+        let header = FileHeaderBuilder::new()
+            .block(4096)
+            .bitsize(BitSize::Four)
+            .build();
+        assert_eq!(header.block, 4096);
+        assert_eq!(header.bits, BitSize::Four);
+    }
+
+    #[test]
+    fn test_builder_defaults() {
+        let header = FileHeaderBuilder::new().build();
+        assert_eq!(header.block, BLOCK_SIZE);
+        assert!(!header.qual);
+        assert!(!header.compressed);
+        assert!(!header.paired);
+        assert!(!header.headers);
+        assert!(!header.flags);
+    }
+
+    // ==================== FileHeader Constructor Tests ====================
+
+    #[test]
+    fn test_file_header_new() {
+        let header = FileHeader::new(true, true, true, BitSize::Four, true, true);
+        assert_eq!(header.block, BLOCK_SIZE);
+        assert!(header.qual);
+        assert!(header.compressed);
+        assert!(header.paired);
+        assert_eq!(header.bits, BitSize::Four);
+        assert!(header.headers);
+        assert!(header.flags);
+        assert!(header.is_paired());
+    }
+
+    #[test]
+    fn test_file_header_default() {
+        let header = FileHeader::default();
+        assert_eq!(header.block, BLOCK_SIZE);
+        assert!(!header.is_paired());
+    }
+
+    #[test]
+    fn test_set_bitsize() {
+        let mut header = FileHeader::default();
+        header.set_bitsize(BitSize::Four);
+        assert_eq!(header.bits, BitSize::Four);
+    }
+
+    // ==================== FileHeader from_bytes/from_reader Tests ====================
+
+    #[test]
+    fn test_file_header_roundtrip() {
+        let header = FileHeader::new(true, false, true, BitSize::Two, true, true);
+        let mut buffer = Vec::new();
+        header.write_bytes(&mut buffer).unwrap();
+        let mut cursor = std::io::Cursor::new(buffer);
+        let parsed = FileHeader::from_reader(&mut cursor).unwrap();
+        assert_eq!(parsed, header);
+    }
+
+    #[test]
+    fn test_file_header_from_bytes_four_bit() {
+        let header = FileHeader::new(false, false, false, BitSize::Four, false, false);
+        let mut buffer = [0u8; SIZE_HEADER];
+        {
+            let mut cursor = std::io::Cursor::new(&mut buffer[..]);
+            header.write_bytes(&mut cursor).unwrap();
+        }
+        let parsed = FileHeader::from_bytes(&buffer).unwrap();
+        assert_eq!(parsed.bits, BitSize::Four);
+    }
+
+    #[test]
+    fn test_file_header_from_bytes_invalid_magic() {
+        let buffer = [0u8; SIZE_HEADER];
+        let result = FileHeader::from_bytes(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_header_from_bytes_invalid_format() {
+        let header = FileHeader::default();
+        let mut buffer = [0u8; SIZE_HEADER];
+        {
+            let mut cursor = std::io::Cursor::new(&mut buffer[..]);
+            header.write_bytes(&mut cursor).unwrap();
+        }
+        buffer[4] = 99;
+        let result = FileHeader::from_bytes(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_header_from_bytes_invalid_bitsize() {
+        let header = FileHeader::default();
+        let mut buffer = [0u8; SIZE_HEADER];
+        {
+            let mut cursor = std::io::Cursor::new(&mut buffer[..]);
+            header.write_bytes(&mut cursor).unwrap();
+        }
+        buffer[16] = 99;
+        let result = FileHeader::from_bytes(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_header_from_reader_truncated() {
+        let mut cursor = std::io::Cursor::new(vec![0u8; 5]);
+        let result = FileHeader::from_reader(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    // ==================== BlockHeader Tests ====================
+
+    #[test]
+    fn test_block_header_from_bytes_invalid_magic() {
+        let buffer = [0u8; SIZE_BLOCK_HEADER];
+        let result = BlockHeader::from_bytes(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_block_header_roundtrip() {
+        let header = BlockHeader::new(2048, 42);
+        let mut buffer = Vec::new();
+        header.write_bytes(&mut buffer).unwrap();
+        let mut fixed = [0u8; SIZE_BLOCK_HEADER];
+        fixed.copy_from_slice(&buffer);
+        let parsed = BlockHeader::from_bytes(&fixed).unwrap();
+        assert_eq!(parsed.size, 2048);
+        assert_eq!(parsed.records, 42);
+        assert!(!parsed.is_empty());
     }
 }

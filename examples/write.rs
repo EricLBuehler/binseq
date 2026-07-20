@@ -75,17 +75,15 @@ impl Args {
     fn format(&self) -> Format {
         if let Some(format) = self.format {
             format
-        } else {
-            if let Some(output) = &self.output {
-                match output.split(".").last() {
-                    Some("bq") => Format::Bq,
-                    Some("vbq") => Format::Vbq,
-                    Some("cbq") => Format::Cbq,
-                    _ => Format::default(),
-                }
-            } else {
-                Format::default()
+        } else if let Some(output) = &self.output {
+            match output.split('.').next_back() {
+                Some("bq") => Format::Bq,
+                Some("vbq") => Format::Vbq,
+                Some("cbq") => Format::Cbq,
+                _ => Format::default(),
             }
+        } else {
+            Format::default()
         }
     }
     fn bitsize(&self) -> BitSize {
@@ -98,9 +96,9 @@ impl Args {
     /// Creates an output file handle
     fn ohandle(&self) -> Result<BoxedWriter> {
         let path = if let Some(output) = &self.output {
-            output.to_string()
+            output.clone()
         } else {
-            format!("{}{}", &self.prefix, self.format().extension())
+            format!("{}{}", self.prefix, self.format().extension())
         };
         let ofile = std::fs::File::create(path).map(BufWriter::new)?;
         Ok(Box::new(ofile))
@@ -225,7 +223,7 @@ impl<Rf: paraseq::Record> PairedParallelProcessor<Rf> for Encoder {
 
 fn encode_paired(args: &Args) -> Result<()> {
     let mut r1 = fastx::Reader::from_path(&args.input)?;
-    let mut r2 = fastx::Reader::from_path(&args.input2.as_ref().expect("Missing input2"))?;
+    let mut r2 = fastx::Reader::from_path(args.input2.as_ref().expect("Missing input2"))?;
     let ohandle = args.ohandle()?;
 
     // prepare writer

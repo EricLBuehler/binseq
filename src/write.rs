@@ -96,6 +96,24 @@ impl Format {
             Self::Cbq => ".cbq",
         }
     }
+
+    /// Determines the BINSEQ format by inspecting the magic bytes at the start of a buffer.
+    ///
+    /// This identifies the format from file content rather than a file extension, so it
+    /// works regardless of how the file is named. Returns `None` if `bytes` is too short
+    /// or does not start with a recognized magic sequence.
+    #[must_use]
+    pub fn sniff(bytes: &[u8]) -> Option<Self> {
+        if bytes.starts_with(cbq::FILE_MAGIC) {
+            Some(Self::Cbq)
+        } else if bytes.starts_with(&bq::FILE_MAGIC) {
+            Some(Self::Bq)
+        } else if bytes.starts_with(&vbq::FILE_MAGIC) {
+            Some(Self::Vbq)
+        } else {
+            None
+        }
+    }
 }
 
 /// Builder for creating [`BinseqWriter`] instances
@@ -430,7 +448,10 @@ impl BinseqWriterBuilder {
             .with_headers(self.headers)
             .with_flags(self.flags)
             .with_optional_block_size(self.block_size)
-            .with_optional_compression_level(self.compression_level.map(|level| level as usize))
+            .with_optional_compression_level(
+                self.compression_level
+                    .map(|level| usize::try_from(level).unwrap_or(0)),
+            )
             .build();
 
         let inner = if self.headless {
@@ -447,6 +468,11 @@ impl BinseqWriterBuilder {
 ///
 /// This enum wraps the three format-specific writers (BQ, VBQ, CBQ) and provides
 /// a unified interface for writing sequence data.
+// `cbq::ColumnarBlockWriter` is intrinsically larger than the other variants (it holds a
+// reusable `ColumnarBlock` encode buffer). Boxing it would shrink this enum but is a breaking
+// change to the variant's public field type, so it's left as-is rather than churn downstream
+// consumers.
+#[allow(clippy::large_enum_variant)]
 pub enum BinseqWriter<W: Write> {
     /// BQ format writer
     Bq(bq::Writer<W>),
@@ -636,6 +662,22 @@ mod tests {
         assert_eq!(Format::Bq.extension(), ".bq");
         assert_eq!(Format::Vbq.extension(), ".vbq");
         assert_eq!(Format::Cbq.extension(), ".cbq");
+    }
+
+    #[test]
+    fn test_format_sniff() {
+        assert_eq!(Format::sniff(&bq::FILE_MAGIC), Some(Format::Bq));
+        assert_eq!(Format::sniff(&vbq::FILE_MAGIC), Some(Format::Vbq));
+        assert_eq!(Format::sniff(cbq::FILE_MAGIC), Some(Format::Cbq));
+
+        // Trailing bytes after the magic sequence are ignored.
+        let mut cbq_like = cbq::FILE_MAGIC.to_vec();
+        cbq_like.extend_from_slice(b"trailing data");
+        assert_eq!(Format::sniff(&cbq_like), Some(Format::Cbq));
+
+        assert_eq!(Format::sniff(b"not a binseq file"), None);
+        assert_eq!(Format::sniff(&[]), None);
+        assert_eq!(Format::sniff(b"BS"), None);
     }
 
     #[test]

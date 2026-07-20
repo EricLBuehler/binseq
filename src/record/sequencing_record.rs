@@ -401,3 +401,86 @@ impl<'a> SequencingRecordBuilder<'a> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== SequencingRecord::new() and accessors ====================
+
+    #[test]
+    fn test_new_constructor() {
+        let record = SequencingRecord::new(
+            b"ACGT",
+            Some(b"IIII"),
+            Some(b"s_hdr"),
+            Some(b"TGCA"),
+            Some(b"FFFF"),
+            Some(b"x_hdr"),
+            Some(7),
+        );
+        assert_eq!(record.s_seq(), b"ACGT");
+        assert_eq!(record.s_qual(), Some(b"IIII".as_slice()));
+        assert_eq!(record.s_header(), Some(b"s_hdr".as_slice()));
+        assert_eq!(record.x_seq(), Some(b"TGCA".as_slice()));
+        assert_eq!(record.x_qual(), Some(b"FFFF".as_slice()));
+        assert_eq!(record.x_header(), Some(b"x_hdr".as_slice()));
+        assert_eq!(record.flag(), Some(7));
+    }
+
+    #[test]
+    fn test_new_constructor_minimal() {
+        let record = SequencingRecord::new(b"ACGT", None, None, None, None, None, None);
+        assert_eq!(record.s_seq(), b"ACGT");
+        assert_eq!(record.s_qual(), None);
+        assert_eq!(record.s_header(), None);
+        assert_eq!(record.x_seq(), None);
+        assert_eq!(record.x_qual(), None);
+        assert_eq!(record.x_header(), None);
+        assert_eq!(record.flag(), None);
+        assert!(!record.is_paired());
+        assert!(!record.has_flags());
+        assert!(!record.has_headers());
+        assert!(!record.has_qualities());
+    }
+
+    // ==================== SequencingRecordBuilder opt_* setters ====================
+
+    #[test]
+    fn test_builder_opt_setters_some() {
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .opt_s_header(Some(b"s_hdr"))
+            .opt_x_seq(Some(b"TGCA"))
+            .opt_x_qual(Some(b"FFFF"))
+            .opt_flag(Some(9))
+            .build()
+            .unwrap();
+        assert_eq!(record.s_header(), Some(b"s_hdr".as_slice()));
+        assert_eq!(record.x_seq(), Some(b"TGCA".as_slice()));
+        assert_eq!(record.x_qual(), Some(b"FFFF".as_slice()));
+        assert_eq!(record.flag(), Some(9));
+    }
+
+    #[test]
+    fn test_builder_opt_setters_none() {
+        let record = SequencingRecordBuilder::default()
+            .s_seq(b"ACGT")
+            .opt_s_header(None)
+            .opt_x_seq(None)
+            .opt_x_qual(None)
+            .opt_flag(None)
+            .build()
+            .unwrap();
+        assert_eq!(record.s_header(), None);
+        assert_eq!(record.x_seq(), None);
+        assert_eq!(record.x_qual(), None);
+        assert_eq!(record.flag(), None);
+    }
+
+    #[test]
+    fn test_builder_missing_sequence() {
+        let result = SequencingRecordBuilder::default().build();
+        assert!(result.is_err());
+    }
+}

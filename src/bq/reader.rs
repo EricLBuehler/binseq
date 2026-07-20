@@ -599,6 +599,14 @@ pub struct StreamReader<R: Read> {
 
     /// Length of valid data in the buffer
     buffer_len: usize,
+
+    /// Number of records returned so far, used to assign each record's id
+    ///
+    /// This is tracked independently of `buffer_pos` because `fill_buffer`
+    /// shifts remaining bytes to the start of the buffer and resets
+    /// `buffer_pos` whenever a mid-stream refill is needed, so `buffer_pos`
+    /// no longer reflects the absolute stream offset once that happens.
+    records_read: u64,
 }
 
 impl<R: Read> StreamReader<R> {
@@ -641,6 +649,7 @@ impl<R: Read> StreamReader<R> {
             buffer_pos: 0,
             buffer_len: 0,
             default_quality_score: DEFAULT_QUALITY_SCORE,
+            records_read: 0,
         }
     }
 
@@ -673,27 +682,25 @@ impl<R: Read> StreamReader<R> {
     /// * The header data is invalid
     /// * End of stream is reached before the full header can be read
     pub fn read_header(&mut self) -> Result<&FileHeader> {
-        if self.header.is_some() {
-            return Ok(self
-                .header
-                .as_ref()
-                .expect("Missing header when expected in stream"));
+        if self.header.is_none() {
+            // Ensure we have enough data for the header
+            while self.buffer_len - self.buffer_pos < SIZE_HEADER {
+                self.fill_buffer()?;
+            }
+
+            // Parse header
+            let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
+            let header = FileHeader::from_buffer(header_slice)?;
+
+            self.header = Some(header);
+            self.config = Some(RecordConfig::from_header(&header));
+            self.buffer_pos += SIZE_HEADER;
         }
 
-        // Ensure we have enough data for the header
-        while self.buffer_len - self.buffer_pos < SIZE_HEADER {
-            self.fill_buffer()?;
-        }
-
-        // Parse header
-        let header_slice = &self.buffer[self.buffer_pos..self.buffer_pos + SIZE_HEADER];
-        let header = FileHeader::from_buffer(header_slice)?;
-
-        self.header = Some(header);
-        self.config = Some(RecordConfig::from_header(&header));
-        self.buffer_pos += SIZE_HEADER;
-
-        Ok(self.header.as_ref().unwrap())
+        Ok(self
+            .header
+            .as_ref()
+            .expect("header was just populated above"))
     }
 
     /// Fills the internal buffer with more data from the reader
@@ -797,14 +804,11 @@ impl<R: Read> StreamReader<R> {
             self.qbuf.resize(max_size, self.default_quality_score);
         }
 
-        // Create record with incremental ID (based on read position)
-        let id = (record_start - SIZE_HEADER) / record_size;
-        Some(Ok(RefRecord::new(
-            id as u64,
-            record_u64s,
-            &self.qbuf,
-            config,
-        )))
+        // Create record with an incremental ID, tracked independently of
+        // buffer position since `fill_buffer` may have shifted the buffer
+        let id = self.records_read;
+        self.records_read += 1;
+        Some(Ok(RefRecord::new(id, record_u64s, &self.qbuf, config)))
     }
 
     /// Consumes the stream reader and returns the inner reader
@@ -1031,9 +1035,8 @@ mod tests {
     #[test]
     fn test_mmap_reader_is_paired() {
         let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
-        let is_paired = reader.is_paired();
-        // Test that the method returns a boolean
-        assert!(is_paired || !is_paired); // Always true, tests the method works
+        // The fixture file contains paired records
+        assert!(reader.is_paired());
     }
 
     #[test]
@@ -1121,8 +1124,7 @@ mod tests {
             // All quality scores should be the custom score
             assert!(
                 squal.iter().all(|&q| q == custom_score),
-                "All quality scores should be {}",
-                custom_score
+                "All quality scores should be {custom_score}"
             );
         }
     }
@@ -1180,8 +1182,7 @@ mod tests {
             let final_count = *count.lock().unwrap();
             assert_eq!(
                 final_count, expected_count,
-                "Should process exactly {} records",
-                expected_count
+                "Should process exactly {expected_count} records"
             );
         }
     }
@@ -1194,8 +1195,16 @@ mod tests {
         let header = reader.header();
         let config = RecordConfig::from_header(&header);
 
-        assert_eq!(config.slen, header.slen as u64, "Sequence length mismatch");
-        assert_eq!(config.xlen, header.xlen as u64, "Extended length mismatch");
+        assert_eq!(
+            config.slen,
+            u64::from(header.slen),
+            "Sequence length mismatch"
+        );
+        assert_eq!(
+            config.xlen,
+            u64::from(header.xlen),
+            "Extended length mismatch"
+        );
         assert_eq!(config.bitsize, header.bits, "Bit size mismatch");
     }
 
@@ -1242,17 +1251,17 @@ mod tests {
     fn test_ref_record_paired_data() {
         let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
 
-        if reader.is_paired() {
-            if let Ok(record) = reader.get(0) {
-                let xbuf = record.xbuf();
-                let xlen = record.xlen();
+        if reader.is_paired()
+            && let Ok(record) = reader.get(0)
+        {
+            let xbuf = record.xbuf();
+            let xlen = record.xlen();
 
-                if xlen > 0 {
-                    assert!(
-                        !xbuf.is_empty(),
-                        "Extended buffer should not be empty for paired"
-                    );
-                }
+            if xlen > 0 {
+                assert!(
+                    !xbuf.is_empty(),
+                    "Extended buffer should not be empty for paired"
+                );
             }
         }
     }
@@ -1287,12 +1296,11 @@ mod tests {
 
         for i in 0..num_records {
             let record = reader.get(i);
-            assert!(record.is_ok(), "Should get record at index {}", i);
+            assert!(record.is_ok(), "Should get record at index {i}");
             assert_eq!(
                 record.unwrap().index() as usize,
                 i,
-                "Record index mismatch at {}",
-                i
+                "Record index mismatch at {i}"
             );
         }
     }
@@ -1307,9 +1315,211 @@ mod tests {
 
             for &idx in &indices {
                 let record = reader.get(idx);
-                assert!(record.is_ok(), "Should get record at index {}", idx);
+                assert!(record.is_ok(), "Should get record at index {idx}");
                 assert_eq!(record.unwrap().index() as usize, idx);
             }
         }
+    }
+
+    // ==================== get_buffer_slice Tests ====================
+
+    #[test]
+    fn test_get_buffer_slice_valid() {
+        let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
+        let num_records = reader.num_records().min(10);
+        let slice = reader.get_buffer_slice(0..num_records);
+        assert!(slice.is_ok());
+        assert_eq!(
+            slice.unwrap().len(),
+            num_records * reader.config.record_size_u64()
+        );
+    }
+
+    #[test]
+    fn test_get_buffer_slice_out_of_range() {
+        let reader = MmapReader::new(TEST_BQ_FILE).unwrap();
+        let num_records = reader.num_records();
+        let slice = reader.get_buffer_slice(0..(num_records + 100));
+        assert!(slice.is_err());
+    }
+
+    // ==================== MmapReader Error Path Tests ====================
+
+    #[test]
+    fn test_mmap_reader_directory_is_incompatible() {
+        // Directories cannot be memory-mapped as regular files
+        let result = MmapReader::new("./data");
+        assert!(result.is_err(), "Should fail when given a directory");
+    }
+
+    #[test]
+    fn test_mmap_reader_truncated_file() {
+        use std::io::Write as _;
+
+        let path = "test_truncated_reader.bq";
+        {
+            let header = crate::bq::FileHeaderBuilder::new()
+                .slen(64)
+                .build()
+                .unwrap();
+            let mut file = std::fs::File::create(path).unwrap();
+            header.write_bytes(&mut file).unwrap();
+            // Write a partial record (not a full multiple of the record size)
+            file.write_all(&[0u8; 4]).unwrap();
+        }
+
+        let result = MmapReader::new(path);
+        assert!(result.is_err(), "Should fail on truncated record data");
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    // ==================== StreamReader Tests ====================
+
+    fn build_stream_bytes(paired: bool) -> Vec<u8> {
+        use crate::SequencingRecordBuilder;
+        use crate::bq::{FileHeaderBuilder, WriterBuilder};
+
+        let header = if paired {
+            FileHeaderBuilder::new().slen(64).xlen(32).build().unwrap()
+        } else {
+            FileHeaderBuilder::new().slen(64).build().unwrap()
+        };
+
+        let mut writer = WriterBuilder::default()
+            .header(header)
+            .build(Vec::new())
+            .unwrap();
+
+        for i in 0..5 {
+            let s_seq = vec![b"ACGT"[i % 4]; 64];
+            let x_seq = vec![b"TGCA"[i % 4]; 32];
+            let record = if paired {
+                SequencingRecordBuilder::default()
+                    .s_seq(&s_seq)
+                    .x_seq(&x_seq)
+                    .build()
+                    .unwrap()
+            } else {
+                SequencingRecordBuilder::default()
+                    .s_seq(&s_seq)
+                    .build()
+                    .unwrap()
+            };
+            writer.push(record).unwrap();
+        }
+        writer.flush().unwrap();
+        writer.into_inner()
+    }
+
+    #[test]
+    fn test_stream_reader_new_and_with_capacity() {
+        let data = build_stream_bytes(false);
+        let cursor = std::io::Cursor::new(data.clone());
+        let _reader = StreamReader::new(cursor);
+
+        let cursor = std::io::Cursor::new(data);
+        let _reader = StreamReader::with_capacity(cursor, 64);
+    }
+
+    #[test]
+    fn test_stream_reader_read_header() {
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let header = reader.read_header().unwrap();
+        assert_eq!(header.slen, 64);
+
+        // Second call should hit the cached path
+        let header_again = reader.read_header().unwrap();
+        assert_eq!(header_again.slen, 64);
+    }
+
+    #[test]
+    fn test_stream_reader_next_record_unpaired() {
+        let data = build_stream_bytes(false);
+        let mmap_reader = {
+            let path = "test_stream_reader_compare.bq";
+            std::fs::write(path, &data).unwrap();
+            let reader = MmapReader::new(path).unwrap();
+            std::fs::remove_file(path).unwrap();
+            reader
+        };
+
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let mut count = 0;
+        while let Some(record) = reader.next_record() {
+            let record = record.unwrap();
+            let expected = mmap_reader.get(count).unwrap();
+            assert_eq!(record.index(), expected.index());
+            assert_eq!(record.sbuf(), expected.sbuf());
+            count += 1;
+        }
+        assert_eq!(count, mmap_reader.num_records());
+    }
+
+    #[test]
+    fn test_stream_reader_next_record_paired() {
+        let data = build_stream_bytes(true);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        let mut count = 0;
+        while let Some(record) = reader.next_record() {
+            let record = record.unwrap();
+            assert!(record.is_paired());
+            count += 1;
+        }
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn test_stream_reader_small_buffer_forces_multiple_fills() {
+        // Use a tiny buffer capacity so `fill_buffer` must shift remaining
+        // bytes to the start of the internal buffer mid-stream (reader.rs
+        // 716-719). Record ids are tracked via a dedicated `records_read`
+        // counter (not derived from `buffer_pos`), so they must still come
+        // back sequential across that shift boundary.
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::with_capacity(std::io::Cursor::new(data), 40);
+        let mut expected_id = 0u64;
+        while let Some(record) = reader.next_record() {
+            let record = record.unwrap();
+            assert_eq!(record.index(), expected_id);
+            expected_id += 1;
+        }
+        assert_eq!(expected_id, 5);
+    }
+
+    #[test]
+    fn test_stream_reader_partial_record_error() {
+        let mut data = build_stream_bytes(false);
+        // Truncate the data in the middle of the last record
+        data.truncate(data.len() - 4);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+
+        let mut saw_error = false;
+        while let Some(record) = reader.next_record() {
+            if record.is_err() {
+                saw_error = true;
+                break;
+            }
+        }
+        assert!(saw_error, "Expected a partial record error");
+    }
+
+    #[test]
+    fn test_stream_reader_set_default_quality_score() {
+        let data = build_stream_bytes(false);
+        let mut reader = StreamReader::new(std::io::Cursor::new(data));
+        reader.set_default_quality_score(42);
+        if let Some(Ok(record)) = reader.next_record() {
+            assert!(record.squal().iter().all(|&q| q == 42));
+        }
+    }
+
+    #[test]
+    fn test_stream_reader_into_inner() {
+        let data = build_stream_bytes(false);
+        let reader = StreamReader::new(std::io::Cursor::new(data.clone()));
+        let cursor = reader.into_inner();
+        assert_eq!(cursor.into_inner(), data);
     }
 }

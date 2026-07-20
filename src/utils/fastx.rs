@@ -86,6 +86,7 @@ impl FastxEncoderBuilder {
     ///     .run()?;
     /// # Ok::<(), binseq::Error>(())
     /// ```
+    #[must_use]
     pub fn input<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.input = Some(FastxInput::Single(path.as_ref().to_path_buf()));
         self
@@ -125,6 +126,7 @@ impl FastxEncoderBuilder {
     ///     .run()?;
     /// # Ok::<(), binseq::Error>(())
     /// ```
+    #[must_use]
     pub fn input_paired<P: AsRef<Path>>(mut self, r1: P, r2: P) -> Self {
         self.input = Some(FastxInput::Paired(
             r1.as_ref().to_path_buf(),
